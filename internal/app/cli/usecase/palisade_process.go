@@ -9,6 +9,8 @@ import (
     "os"
     "sort"
     
+    "github.com/drybin/palisade/internal/adapter/webapi"
+    "github.com/drybin/palisade/internal/domain/enum/order"
     "github.com/drybin/palisade/internal/domain/model"
     "github.com/drybin/palisade/pkg/wrap"
 )
@@ -18,13 +20,38 @@ type IPalisadeProcess interface {
 }
 
 type PalisadeProcess struct {
+    repo *webapi.MexcWebapi
 }
 
-func NewPalisadeProcessUsecase() *PalisadeProcess {
-    return &PalisadeProcess{}
+func NewPalisadeProcessUsecase(repo *webapi.MexcWebapi) *PalisadeProcess {
+    return &PalisadeProcess{
+        repo: repo,
+    }
 }
 
-func (u *PalisadeProcess) Process(_ context.Context) error {
+func (u *PalisadeProcess) Process(ctx context.Context) error {
+    fmt.Println("palisade process")
+    accountInfo, err := u.repo.GetBalance(ctx)
+    if err != nil {
+        return wrap.Errorf("failed to get balance: %w", err)
+    }
+    fmt.Printf("accountInfo: %+v\n", accountInfo)
+    
+    orderResult, err := u.repo.NewOrder(
+        ctx,
+        model.OrderParams{
+            Symbol:           "DOLZUSDT",
+            Side:             order.BUY,
+            OrderType:        order.LIMIT,
+            Quantity:         1799.0,
+            QuoteOrderQty:    1799.0,
+            Price:            0.00556,
+            NewClientOrderId: "Test order 1",
+        },
+    )
+    fmt.Printf("orderResult: %+v\n", orderResult)
+    os.Exit(1)
+    
     data, err := getCvsData()
     if err != nil {
         return wrap.Errorf("failed to get csv data: %w", err)
