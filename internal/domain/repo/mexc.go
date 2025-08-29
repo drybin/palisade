@@ -1,9 +1,9 @@
 package repo
 
 import (
-    "context"
+	"context"
 )
 
 type IMexcRepository interface {
-    GetBalance(ctx context.Context) error
+	GetBalance(ctx context.Context) error
 }

@@ -1,4 +1,4 @@
-module mexc-sdk/mexcsdk
+module github.com/drybin/palisade/mexcsdk
 
 go 1.16
 
