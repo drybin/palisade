@@ -3,6 +3,7 @@ module github.com/drybin/palisade
 go 1.22.3
 
 require (
+	github.com/go-ozzo/ozzo-validation/v4 v4.3.0
 	github.com/go-resty/resty/v2 v2.16.5
 	github.com/joho/godotenv v1.5.1
 	github.com/stretchr/testify v1.10.0

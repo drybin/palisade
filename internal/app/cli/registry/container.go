@@ -1,6 +1,7 @@
 package registry
 
 import (
+    repo "github.com/drybin/palisade/internal/adapter/webapi"
     "github.com/drybin/palisade/internal/app/cli/config"
     "github.com/drybin/palisade/internal/app/cli/usecase"
     "github.com/drybin/palisade/pkg/logger"
@@ -23,7 +24,8 @@ func NewContainer(
     
     container := Container{
         Usecases: &Usecases{
-            HelloWorld: usecase.NewHelloWorldUsecase(),
+            HelloWorld:      usecase.NewHelloWorldUsecase(),
+            PalisadeProcess: usecase.NewPalisadeProcessUsecase(repo.NewMexcWebapi(config.MexcConfig)),
         },
         Clean: func() {
         },
