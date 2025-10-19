@@ -31,6 +31,7 @@ func Run(config *config.Config) error {
 		command.NewHelloWorldCommand(cnt.Usecases.HelloWorld),
 		command.NewPalisadeProcessCommand(cnt.Usecases.PalisadeProcess),
 		command.NewGetCoinListCommand(cnt.Usecases.GetCoinList),
+		command.NewCheckPalisadeCoinListCommand(cnt.Usecases.CheckPalisadeCoinList),
 	}
 
 	return app.Run(os.Args)

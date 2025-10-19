@@ -2,6 +2,8 @@ package registry
 
 import (
 	"context"
+	"mexc-sdk/mexcsdk"
+
 	registry "github.com/drybin/palisade/internal/adapter/pg"
 	repo "github.com/drybin/palisade/internal/adapter/webapi"
 	"github.com/drybin/palisade/internal/app/cli/config"
@@ -11,7 +13,6 @@ import (
 	"github.com/drybin/palisade/pkg/wrap"
 	"github.com/go-resty/resty/v2"
 	"github.com/jackc/pgx/v5"
-	"mexc-sdk/mexcsdk"
 )
 
 type Container struct {
@@ -22,9 +23,10 @@ type Container struct {
 }
 
 type Usecases struct {
-	HelloWorld      *usecase.HelloWorld
-	PalisadeProcess *usecase.PalisadeProcess
-	GetCoinList     *usecase.GetCoinList
+	HelloWorld            *usecase.HelloWorld
+	PalisadeProcess       *usecase.PalisadeProcess
+	GetCoinList           *usecase.GetCoinList
+	CheckPalisadeCoinList *usecase.CheckPalisadeCoinList
 }
 
 func NewContainer(
@@ -59,7 +61,8 @@ func NewContainer(
 				service.NewByuService(mexcApi, mexcV2Api, stateRepo),
 				stateRepo,
 			),
-			GetCoinList: usecase.NewGetCoinListUsecase(mexcApi, stateRepo),
+			GetCoinList:           usecase.NewGetCoinListUsecase(mexcApi, stateRepo),
+			CheckPalisadeCoinList: usecase.NewCheckPalisadeCoinListUsecase(mexcApi, stateRepo),
 		},
 		MexcSpot: mexcSpot,
 		Clean: func() {

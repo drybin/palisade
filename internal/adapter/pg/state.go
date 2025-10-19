@@ -1,6 +1,7 @@
 package registry
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strconv"
@@ -8,11 +9,9 @@ import (
 
 	"github.com/drybin/palisade/internal/domain/model"
 	"github.com/drybin/palisade/internal/domain/model/mexc"
-	palisade_database "github.com/drybin/palisade/sqlc/gen"
-
-	"context"
-
+	"github.com/drybin/palisade/internal/domain/repo"
 	"github.com/drybin/palisade/pkg/wrap"
+	palisade_database "github.com/drybin/palisade/sqlc/gen"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -114,6 +113,38 @@ func (u StateRepository) GetCoinInfo(
 	}
 
 	return mapCoinToDomainModel(coinInfo)
+}
+
+func (u StateRepository) GetCoins(
+	ctx context.Context,
+	params repo.GetCoinsParams,
+) ([]mexc.SymbolDetail, error) {
+	db := palisade_database.New(u.Postgree)
+
+	coins, err := db.GetCoins(ctx, palisade_database.GetCoinsParams{
+		Limit:                params.Limit,
+		Offset:               params.Offset,
+		Isspottradingallowed: params.IsSpotTradingAllowed,
+		Ispalisade:           params.IsPalisade,
+	})
+
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return []mexc.SymbolDetail{}, nil
+		}
+		return nil, wrap.Errorf("failed to get coins from Postgree: %w", err)
+	}
+
+	result := make([]mexc.SymbolDetail, 0, len(coins))
+	for _, coin := range coins {
+		symbolDetail, err := mapCoinToDomainModel(coin)
+		if err != nil {
+			return nil, wrap.Errorf("failed to map coin to domain model: %w", err)
+		}
+		result = append(result, *symbolDetail)
+	}
+
+	return result, nil
 }
 
 func mapCoinToDomainModel(c palisade_database.Coin) (*mexc.SymbolDetail, error) {

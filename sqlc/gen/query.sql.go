@@ -48,6 +48,74 @@ func (q *Queries) GetCoinInfo(ctx context.Context, symbol string) (Coin, error) 
 	return i, err
 }
 
+const getCoins = `-- name: GetCoins :many
+SELECT id, date, symbol, status, baseasset, baseassetprecision, quoteasset, quoteprecision, quoteassetprecision, basecommissionprecision, quotecommissionprecision, ordertypes, isspottradingallowed, ismargintradingallowed, quoteamountprecision, basesizeprecision, permissions, maxquoteamount, makercommission, takercommission, quoteamountprecisionmarket, maxquoteamountmarket, fullname, tradesidetype, ispalisade FROM coins
+WHERE 
+    ($3::boolean IS NULL OR isSpotTradingAllowed = $3)
+    AND ($4::boolean IS NULL OR isPalisade = $4)
+ORDER BY id
+LIMIT $1
+OFFSET $2
+`
+
+type GetCoinsParams struct {
+	Limit                int
+	Offset               int
+	Isspottradingallowed *bool
+	Ispalisade           *bool
+}
+
+func (q *Queries) GetCoins(ctx context.Context, arg GetCoinsParams) ([]Coin, error) {
+	rows, err := q.db.Query(ctx, getCoins,
+		arg.Limit,
+		arg.Offset,
+		arg.Isspottradingallowed,
+		arg.Ispalisade,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Coin
+	for rows.Next() {
+		var i Coin
+		if err := rows.Scan(
+			&i.ID,
+			&i.Date,
+			&i.Symbol,
+			&i.Status,
+			&i.Baseasset,
+			&i.Baseassetprecision,
+			&i.Quoteasset,
+			&i.Quoteprecision,
+			&i.Quoteassetprecision,
+			&i.Basecommissionprecision,
+			&i.Quotecommissionprecision,
+			&i.Ordertypes,
+			&i.Isspottradingallowed,
+			&i.Ismargintradingallowed,
+			&i.Quoteamountprecision,
+			&i.Basesizeprecision,
+			&i.Permissions,
+			&i.Maxquoteamount,
+			&i.Makercommission,
+			&i.Takercommission,
+			&i.Quoteamountprecisionmarket,
+			&i.Maxquoteamountmarket,
+			&i.Fullname,
+			&i.Tradesidetype,
+			&i.Ispalisade,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getCoinState = `-- name: GetCoinState :one
 SELECT id, date, account_balance, coinfirst, coinsecond, price, amount, state, orderid, uplevel, downlevel FROM state
 WHERE coinFirst = $1 AND coinSecond = $2 LIMIT 1
