@@ -1,0 +1,11 @@
+version: '3'
+services:
+  db:
+    image: postgres:16
+    restart: always
+    env_file:
+      - .env
+    volumes:
+      - ./data/postgree:/var/lib/postgresql/data
+    ports:
+      - 5432:5432

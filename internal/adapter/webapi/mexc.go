@@ -1,115 +1,218 @@
 package webapi
 
 import (
-    "context"
-    "crypto/hmac"
-    "crypto/sha256"
-    "encoding/hex"
-    "encoding/json"
-    "fmt"
-    "net/url"
-    "time"
-    
-    "github.com/drybin/palisade/internal/app/cli/config"
-    "github.com/drybin/palisade/internal/domain/model"
-    "github.com/drybin/palisade/internal/domain/model/mexc"
-    "github.com/drybin/palisade/pkg/wrap"
-    "github.com/go-resty/resty/v2"
+	"context"
+	"encoding/json"
+	"fmt"
+	"mexc-sdk/mexcsdk"
+	"os"
+
+	"github.com/drybin/palisade/internal/app/cli/config"
+	"github.com/drybin/palisade/internal/domain/enum"
+	"github.com/drybin/palisade/internal/domain/model"
+	"github.com/drybin/palisade/internal/domain/model/mexc"
+	"github.com/drybin/palisade/pkg/wrap"
+	"github.com/go-resty/resty/v2"
 )
 
 const mexc_spot_account_info_url = "/api/v3/account"
 const mexc_new_order_url = "/api/v3/order"
 
 type MexcWebapi struct {
-    client *resty.Client
-    config config.MexcConfig
+	client *resty.Client
+	spot   mexcsdk.Spot
+	config config.MexcConfig
 }
 
 func NewMexcWebapi(
-    client *resty.Client,
-    config config.MexcConfig,
+	client *resty.Client,
+	spot mexcsdk.Spot,
+	config config.MexcConfig,
 ) *MexcWebapi {
-    return &MexcWebapi{
-        client: client,
-        config: config,
-    }
+	return &MexcWebapi{
+		client: client,
+		spot:   spot,
+		config: config,
+	}
 }
 
 func (m *MexcWebapi) GetBalance(ctx context.Context) (*mexc.SpotAccountInfo, error) {
-    params := url.Values{}
-    params = generateSignatureAndAddToParam(m.config.Secret, params)
-    
-    req := m.client.R()
-    for key, values := range params {
-        for _, value := range values {
-            req.SetQueryParam(key, value)
-        }
-    }
-    
-    res, err := req.Get(mexc_spot_account_info_url)
-    if err != nil {
-        return nil, wrap.Errorf("failed to get spot acoount info: %w", err)
-    }
-    
-    result := mexc.SpotAccountInfo{}
-    err = json.Unmarshal(res.Body(), &result)
-    if err != nil {
-        return nil, wrap.Errorf("failed to unmarshal swap info: %w", err)
-    }
-    
-    return &result, nil
+	res := m.spot.AccountInfo()
+	bytes, _ := json.Marshal(res)
+
+	result := mexc.SpotAccountInfo{}
+	err := json.Unmarshal(bytes, &result)
+	if err != nil {
+		return nil, wrap.Errorf("failed to unmarshal accountInfo info: %w", err)
+	}
+
+	return &result, nil
+}
+
+func (m *MexcWebapi) GetAllTickerPrices(ctx context.Context) (*mexc.TickersWithPrice, error) {
+	res := m.spot.TickerPrice(nil)
+	bytes, _ := json.Marshal(res)
+
+	result := mexc.TickersWithPrice{}
+	err := json.Unmarshal(bytes, &result)
+	if err != nil {
+		return nil, wrap.Errorf("failed to unmarshal ticker with price info: %w", err)
+	}
+
+	return &result, nil
+}
+
+func (m *MexcWebapi) GetSymbolInfo(ctx context.Context, symbol string) (*mexc.SymbolInfo, error) {
+	options := map[string]string{
+		"symbol": symbol,
+	}
+	res := m.spot.ExchangeInfo(options)
+	bytes, _ := json.Marshal(res)
+
+	result := mexc.SymbolInfo{}
+	err := json.Unmarshal(bytes, &result)
+	if err != nil {
+		return nil, wrap.Errorf("failed to unmarshal symbol info: %w", err)
+	}
+
+	return &result, nil
 }
 
 func (m *MexcWebapi) NewOrder(
-    ctx context.Context,
-    orderParams model.OrderParams,
+	orderParams model.OrderParams,
 ) (*mexc.PlaceOrderResult, error) {
-    params := url.Values{}
-    params.Set("symbol", orderParams.Symbol)
-    params.Set("side", orderParams.Side.String())
-    params.Set("type", orderParams.OrderType.String())
-    params.Set("quantity", fmt.Sprintf("%f", orderParams.Quantity))
-    //params.Set("quoteOrderQty", fmt.Sprintf("%f", orderParams.QuoteOrderQty))
-    params.Set("price", fmt.Sprintf("%f", orderParams.Price))
-    //params.Set("newClientOrderId", fmt.Sprintf("%f", orderParams.NewClientOrderId))
-    params.Set("recvWindow", "5000")
-    params = generateSignatureAndAddToParam(m.config.Secret, params)
-    
-    req := m.client.R()
-    //for key, values := range params {
-    //	for _, value := range values {
-    //		req.SetQueryParam(key, value)
-    //	}
-    //}
-    
-    req.SetBody(params.Encode())
-    res, err := req.Post(mexc_new_order_url)
-    if err != nil {
-        return nil, wrap.Errorf("failed to place order: %w", err)
-    }
-    
-    result := mexc.PlaceOrderResult{}
-    err = json.Unmarshal(res.Body(), &result)
-    if err != nil {
-        return nil, wrap.Errorf("failed to unmarshal swap info: %w", err)
-    }
-    
-    return &result, nil
+
+	options := map[string]string{
+		"price":            orderParams.GetPrice(),
+		"quantity":         orderParams.GetQuantity(),
+		"newClientOrderId": orderParams.NewClientOrderId,
+	}
+
+	resp := m.spot.NewOrder(orderParams.GetSymbol(), orderParams.GetSide(), orderParams.GetOrderType(), options)
+
+	if resp == nil {
+		return nil, wrap.Errorf("failed to place order on mexc: %w", resp)
+	}
+
+	bytes, _ := json.Marshal(resp)
+
+	result := mexc.PlaceOrderResult{}
+	err := json.Unmarshal(bytes, &result)
+	if err != nil {
+		return nil, wrap.Errorf("failed to unmarshal order info: %w", err)
+	}
+
+	return &result, nil
 }
 
-func generateSignatureAndAddToParam(apiSecret string, params url.Values) url.Values {
-    timestamp := time.Now().UnixMilli()
-    params.Set("timestamp", fmt.Sprintf("%d", timestamp))
-    
-    signature := sign(params.Encode(), apiSecret)
-    params.Set("signature", signature)
-    
-    return params
+func (m *MexcWebapi) GetOpenOrders(
+	ctx context.Context,
+	orderParams model.OrderParams,
+) (*mexc.OpenOrders, error) {
+
+	resp := m.spot.OpenOrders(orderParams.GetSymbol())
+
+	if resp == nil {
+		return nil, wrap.Errorf("failed to get open orders: %w", resp)
+	}
+
+	bytes, _ := json.Marshal(resp)
+
+	result := mexc.OpenOrders{}
+	err := json.Unmarshal(bytes, &result)
+	if err != nil {
+		return nil, wrap.Errorf("failed to unmarshal open orders: %w", err)
+	}
+
+	return &result, nil
 }
 
-// функция генерации подписи HMAC-SHA256
-func sign(message, secret string) string {
-    h := hmac.New(sha256.New, []byte(secret))
-    h.Write([]byte(message))
-    return hex.EncodeToString(h.Sum(nil))
+func (m *MexcWebapi) GetKlines(
+	pair model.PairWithLevels,
+	interval enum.KlineInterval,
+) (*mexc.OpenOrders, error) {
+	symbol := pair.Pair.String()
+
+	options := map[string]string{
+		"limit": "700",
+	}
+
+	resp := m.spot.Klines(&symbol, interval.StringPtr(), options)
+	fmt.Printf("resp: %+v\n", resp)
+	os.Exit(1)
+
+	if resp == nil {
+		return nil, wrap.Errorf("failed to get open orders: %w", resp)
+	}
+
+	bytes, _ := json.Marshal(resp)
+
+	result := mexc.OpenOrders{}
+	err := json.Unmarshal(bytes, &result)
+	if err != nil {
+		return nil, wrap.Errorf("failed to unmarshal open orders: %w", err)
+	}
+
+	return &result, nil
+}
+
+func (m *MexcWebapi) GetTicker24hr(
+	pair model.PairWithLevels,
+	interval enum.KlineInterval,
+) (*mexc.OpenOrders, error) {
+	//symbol := pair.Pair.String()
+	//
+	//options := map[string]string{
+	//    "limit": "700",
+	//}
+
+	resp := m.spot.Ticker24hr(pair.Pair.CoinFirst.StringPtr())
+	//resp := m.spot.Klines(&symbol, interval.StringPtr(), options)
+	fmt.Printf("resp: %+v\n", resp)
+	os.Exit(1)
+
+	if resp == nil {
+		return nil, wrap.Errorf("failed to get open orders: %w", resp)
+	}
+
+	bytes, _ := json.Marshal(resp)
+
+	result := mexc.OpenOrders{}
+	err := json.Unmarshal(bytes, &result)
+	if err != nil {
+		return nil, wrap.Errorf("failed to unmarshal open orders: %w", err)
+	}
+
+	return &result, nil
+}
+
+func (m *MexcWebapi) GetTrades(
+	pair model.PairWithLevels,
+	interval enum.KlineInterval,
+) (*mexc.OpenOrders, error) {
+	//symbol := pair.Pair.String()
+	//
+	options := map[string]string{
+		"limit": "700",
+	}
+
+	//resp := m.spot.Ticker24hr(pair.Pair.CoinFirst.StringPtr())
+	resp := m.spot.Trades(pair.Pair.CoinFirst.StringPtr(), &options)
+	//resp := m.spot.Klines(&symbol, interval.StringPtr(), options)
+	fmt.Printf("resp: %+v\n", resp)
+	os.Exit(1)
+
+	if resp == nil {
+		return nil, wrap.Errorf("failed to get open orders: %w", resp)
+	}
+
+	bytes, _ := json.Marshal(resp)
+
+	result := mexc.OpenOrders{}
+	err := json.Unmarshal(bytes, &result)
+	if err != nil {
+		return nil, wrap.Errorf("failed to unmarshal open orders: %w", err)
+	}
+
+	return &result, nil
 }

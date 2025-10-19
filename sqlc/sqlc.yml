@@ -1,0 +1,58 @@
+version: "2"
+sql:
+  - engine: "postgresql"
+    queries: "query.sql"
+    schema: "schema.sql"
+    gen:
+      go:
+        package: "palisade_database"
+        out: "gen"
+        sql_package: "pgx/v5"
+        overrides:
+          #int
+          - db_type: "int4"
+            nullable: true
+            go_type:
+              type: "int"
+              pointer: true
+          - db_type: "int4"
+            go_type:
+              type: "int"
+          - db_type: "pg_catalog.int4"
+            go_type:
+              type: "int"
+          #serial
+          - db_type: "serial"
+            nullable: true
+            go_type:
+              type: "int"
+              pointer: true
+          - db_type: "serial"
+            go_type:
+              type: "int"
+          - db_type: "pg_catalog.int4"
+            go_type:
+              type: "int"
+
+          # timestamptz
+          - db_type: "timestamptz"
+            nullable: true
+            go_type:
+              type: "time.Time"
+              pointer: true
+          - db_type: "timestamptz"
+            go_type:
+              type: "time.Time"
+
+          #flaot
+          - db_type: "double precision"
+            nullable: true
+            go_type:
+              type: "float64"
+              pointer: true
+          - db_type: "double precision"
+            go_type:
+              type: "float64"
+          - db_type: "pg_catalog.float8"
+            go_type:
+              type: "float64"
