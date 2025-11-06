@@ -1,5 +1,7 @@
 package mexc
 
+import "time"
+
 type SymbolInfo struct {
 	Timezone        string         `json:"timezone"`
 	ServerTime      int64          `json:"serverTime"`
@@ -29,13 +31,14 @@ type SymbolDetail struct {
 		BidMultiplierUp   string `json:"bidMultiplierUp"`
 		AskMultiplierDown string `json:"askMultiplierDown"`
 	} `json:"filters"`
-	MaxQuoteAmount             string `json:"maxQuoteAmount"`
-	MakerCommission            string `json:"makerCommission"`
-	TakerCommission            string `json:"takerCommission"`
-	QuoteAmountPrecisionMarket string `json:"quoteAmountPrecisionMarket"`
-	MaxQuoteAmountMarket       string `json:"maxQuoteAmountMarket"`
-	FullName                   string `json:"fullName"`
-	TradeSideType              int    `json:"tradeSideType"`
-	ContractAddress            string `json:"contractAddress"`
-	St                         bool   `json:"st"`
+	MaxQuoteAmount             string    `json:"maxQuoteAmount"`
+	MakerCommission            string    `json:"makerCommission"`
+	TakerCommission            string    `json:"takerCommission"`
+	QuoteAmountPrecisionMarket string    `json:"quoteAmountPrecisionMarket"`
+	MaxQuoteAmountMarket       string    `json:"maxQuoteAmountMarket"`
+	FullName                   string    `json:"fullName"`
+	TradeSideType              int       `json:"tradeSideType"`
+	ContractAddress            string    `json:"contractAddress"`
+	St                         bool      `json:"st"`
+	LastCheck                  time.Time `json:"lastCheck"` // Дата последней проверки (date из таблицы coins)
 }

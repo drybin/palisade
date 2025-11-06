@@ -74,3 +74,14 @@ WHERE
 ORDER BY id
 LIMIT $1
 OFFSET $2;
+
+-- name: UpdateIsPalisade :exec
+UPDATE coins
+SET isPalisade = $1, lastCheck = $2
+WHERE symbol = $3;
+
+-- name: UpdatePalisadeParams :exec
+UPDATE coins
+SET support = $1, resistance = $2, rangeValue = $3, rangePercent = $4, avgPrice = $5, volatility = $6, maxDrawdown = $7, maxRise = $8
+WHERE symbol = $9;
+

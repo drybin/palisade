@@ -19,9 +19,10 @@ const mexc_spot_account_info_url = "/api/v3/account"
 const mexc_new_order_url = "/api/v3/order"
 
 type MexcWebapi struct {
-	client *resty.Client
-	spot   mexcsdk.Spot
-	config config.MexcConfig
+	client       *resty.Client
+	publicClient *resty.Client
+	spot         mexcsdk.Spot
+	config       config.MexcConfig
 }
 
 func NewMexcWebapi(
@@ -29,10 +30,17 @@ func NewMexcWebapi(
 	spot mexcsdk.Spot,
 	config config.MexcConfig,
 ) *MexcWebapi {
+	// Создаем отдельный клиент для публичных запросов без заголовка X-MEXC-APIKEY
+	publicClient := resty.New()
+	publicClient.SetBaseURL(config.BaseUrl)
+	publicClient.SetHeader("Content-Type", "application/json")
+	// Не устанавливаем X-MEXC-APIKEY для публичных запросов
+
 	return &MexcWebapi{
-		client: client,
-		spot:   spot,
-		config: config,
+		client:       client,
+		publicClient: publicClient,
+		spot:         spot,
+		config:       config,
 	}
 }
 
@@ -130,30 +138,34 @@ func (m *MexcWebapi) GetOpenOrders(
 func (m *MexcWebapi) GetKlines(
 	pair model.PairWithLevels,
 	interval enum.KlineInterval,
-) (*mexc.OpenOrders, error) {
+) (*mexc.Klines, error) {
 	symbol := pair.Pair.String()
+	intervalStr := interval.String()
 
-	options := map[string]string{
-		"limit": "700",
-	}
+	// Используем прямой HTTP запрос для публичного endpoint /api/v3/klines
+	// Используем publicClient без заголовка X-MEXC-APIKEY
+	res, err := m.publicClient.R().
+		SetQueryParams(map[string]string{
+			"symbol":   symbol,
+			"interval": intervalStr,
+			"limit":    "700",
+		}).
+		Get("/api/v3/klines")
 
-	resp := m.spot.Klines(&symbol, interval.StringPtr(), options)
-	fmt.Printf("resp: %+v\n", resp)
-	os.Exit(1)
-
-	if resp == nil {
-		return nil, wrap.Errorf("failed to get open orders: %w", resp)
-	}
-
-	bytes, _ := json.Marshal(resp)
-
-	result := mexc.OpenOrders{}
-	err := json.Unmarshal(bytes, &result)
 	if err != nil {
-		return nil, wrap.Errorf("failed to unmarshal open orders: %w", err)
+		return nil, wrap.Errorf("failed to get klines: %w", err)
 	}
 
-	return &result, nil
+	if res.IsError() {
+		return nil, wrap.Errorf("failed to get klines, status: %d, body: %s", res.StatusCode(), string(res.Body()))
+	}
+
+	klines, err := mexc.ParseKlinesFromJSON(res.Body())
+	if err != nil {
+		return nil, wrap.Errorf("failed to parse klines: %w", err)
+	}
+
+	return &klines, nil
 }
 
 func (m *MexcWebapi) GetTicker24hr(

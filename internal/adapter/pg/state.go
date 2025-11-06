@@ -13,6 +13,7 @@ import (
 	"github.com/drybin/palisade/pkg/wrap"
 	palisade_database "github.com/drybin/palisade/sqlc/gen"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 type StateRepository struct {
@@ -121,11 +122,22 @@ func (u StateRepository) GetCoins(
 ) ([]mexc.SymbolDetail, error) {
 	db := palisade_database.New(u.Postgree)
 
+	// Преобразуем *bool в bool (если nil, используем false)
+	isSpotTradingAllowed := false
+	if params.IsSpotTradingAllowed != nil {
+		isSpotTradingAllowed = *params.IsSpotTradingAllowed
+	}
+
+	isPalisade := false
+	if params.IsPalisade != nil {
+		isPalisade = *params.IsPalisade
+	}
+
 	coins, err := db.GetCoins(ctx, palisade_database.GetCoinsParams{
-		Limit:                params.Limit,
-		Offset:               params.Offset,
-		Isspottradingallowed: params.IsSpotTradingAllowed,
-		Ispalisade:           params.IsPalisade,
+		Limit:   int32(params.Limit),
+		Offset:  int32(params.Offset),
+		Column3: isSpotTradingAllowed,
+		Column4: isPalisade,
 	})
 
 	if err != nil {
@@ -145,6 +157,53 @@ func (u StateRepository) GetCoins(
 	}
 
 	return result, nil
+}
+
+func (u StateRepository) UpdateIsPalisade(
+	ctx context.Context,
+	symbol string,
+	isPalisade bool,
+) error {
+	db := palisade_database.New(u.Postgree)
+
+	timeNow := time.Now()
+	err := db.UpdateIsPalisade(ctx, palisade_database.UpdateIsPalisadeParams{
+		Ispalisade: isPalisade,
+		Lastcheck:  &timeNow,
+		Symbol:     symbol,
+	})
+
+	if err != nil {
+		return wrap.Errorf("failed to update isPalisade for coin %s: %w", symbol, err)
+	}
+
+	return nil
+}
+
+func (u StateRepository) UpdatePalisadeParams(
+	ctx context.Context,
+	symbol string,
+	support, resistance, rangeValue, rangePercent, avgPrice, volatility, maxDrawdown, maxRise float64,
+) error {
+	db := palisade_database.New(u.Postgree)
+
+	err := db.UpdatePalisadeParams(ctx, palisade_database.UpdatePalisadeParamsParams{
+		Support:      pgtype.Float8{Float64: support, Valid: true},
+		Resistance:   pgtype.Float8{Float64: resistance, Valid: true},
+		Rangevalue:   pgtype.Float8{Float64: rangeValue, Valid: true},
+		Rangepercent: pgtype.Float8{Float64: rangePercent, Valid: true},
+		Avgprice:     pgtype.Float8{Float64: avgPrice, Valid: true},
+		Volatility:   pgtype.Float8{Float64: volatility, Valid: true},
+		Maxdrawdown:  pgtype.Float8{Float64: maxDrawdown, Valid: true},
+		Maxrise:      pgtype.Float8{Float64: maxRise, Valid: true},
+		Symbol:       symbol,
+	})
+
+	if err != nil {
+		return wrap.Errorf("failed to update palisade params for coin %s: %w", symbol, err)
+	}
+
+	return nil
 }
 
 func mapCoinToDomainModel(c palisade_database.Coin) (*mexc.SymbolDetail, error) {
@@ -178,7 +237,16 @@ func mapCoinToDomainModel(c palisade_database.Coin) (*mexc.SymbolDetail, error) 
 		TradeSideType:              c.Tradesidetype,
 		ContractAddress:            "",
 		St:                         false,
+		LastCheck:                  getLastCheck(c),
 	}, nil
+}
+
+// getLastCheck возвращает Lastcheck, если он не nil, иначе возвращает Date
+func getLastCheck(c palisade_database.Coin) time.Time {
+	if c.Lastcheck != nil {
+		return *c.Lastcheck
+	}
+	return c.Date
 }
 
 func mapToDomainModel(m palisade_database.State) *model.State {

@@ -6,6 +6,8 @@ package palisade_database
 
 import (
 	"time"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 type Coin struct {
@@ -34,6 +36,15 @@ type Coin struct {
 	Fullname                   string
 	Tradesidetype              int
 	Ispalisade                 bool
+	Lastcheck                  *time.Time
+	Support                    pgtype.Float8
+	Resistance                 pgtype.Float8
+	Rangevalue                 pgtype.Float8
+	Rangepercent               pgtype.Float8
+	Avgprice                   pgtype.Float8
+	Volatility                 pgtype.Float8
+	Maxdrawdown                pgtype.Float8
+	Maxrise                    pgtype.Float8
 }
 
 type Log struct {

@@ -52,7 +52,16 @@ CREATE TABLE coins
     maxQuoteAmountMarket       SERIAL NOT NULL,
     fullName                   TEXT             NOT NULL,
     tradeSideType              SERIAL           NOT NULL,
-    isPalisade                 BOOLEAN NOT NULL
+    isPalisade                 BOOLEAN NOT NULL,
+    lastCheck                  TIMESTAMPTZ,
+    support       DOUBLE PRECISION, -- нижняя граница
+    resistance       DOUBLE PRECISION, -- верхняя граница
+    rangeValue       DOUBLE PRECISION, -- диапазон между границами
+    rangePercent     DOUBLE PRECISION, -- диапазон в процентах
+    avgPrice         DOUBLE PRECISION, -- средняя цена
+    volatility       DOUBLE PRECISION, -- волатильность в процентах
+    maxDrawdown      DOUBLE PRECISION, -- максимальная просадка в процентах
+    maxRise          DOUBLE PRECISION -- максимальный рост в процентах
 );
 -- drop table state;
 -- drop table logs;

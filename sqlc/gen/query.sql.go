@@ -8,10 +8,12 @@ package palisade_database
 import (
 	"context"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const getCoinInfo = `-- name: GetCoinInfo :one
-SELECT id, date, symbol, status, baseasset, baseassetprecision, quoteasset, quoteprecision, quoteassetprecision, basecommissionprecision, quotecommissionprecision, ordertypes, isspottradingallowed, ismargintradingallowed, quoteamountprecision, basesizeprecision, permissions, maxquoteamount, makercommission, takercommission, quoteamountprecisionmarket, maxquoteamountmarket, fullname, tradesidetype, ispalisade FROM coins
+SELECT id, date, symbol, status, baseasset, baseassetprecision, quoteasset, quoteprecision, quoteassetprecision, basecommissionprecision, quotecommissionprecision, ordertypes, isspottradingallowed, ismargintradingallowed, quoteamountprecision, basesizeprecision, permissions, maxquoteamount, makercommission, takercommission, quoteamountprecisionmarket, maxquoteamountmarket, fullname, tradesidetype, ispalisade, lastcheck, support, resistance, rangevalue, rangepercent, avgprice, volatility, maxdrawdown, maxrise FROM coins
 WHERE symbol = $1 LIMIT 1
 `
 
@@ -44,12 +46,50 @@ func (q *Queries) GetCoinInfo(ctx context.Context, symbol string) (Coin, error) 
 		&i.Fullname,
 		&i.Tradesidetype,
 		&i.Ispalisade,
+		&i.Lastcheck,
+		&i.Support,
+		&i.Resistance,
+		&i.Rangevalue,
+		&i.Rangepercent,
+		&i.Avgprice,
+		&i.Volatility,
+		&i.Maxdrawdown,
+		&i.Maxrise,
+	)
+	return i, err
+}
+
+const getCoinState = `-- name: GetCoinState :one
+SELECT id, date, account_balance, coinfirst, coinsecond, price, amount, state, orderid, uplevel, downlevel FROM state
+WHERE coinFirst = $1 AND coinSecond = $2 LIMIT 1
+`
+
+type GetCoinStateParams struct {
+	Coinfirst  string
+	Coinsecond string
+}
+
+func (q *Queries) GetCoinState(ctx context.Context, arg GetCoinStateParams) (State, error) {
+	row := q.db.QueryRow(ctx, getCoinState, arg.Coinfirst, arg.Coinsecond)
+	var i State
+	err := row.Scan(
+		&i.ID,
+		&i.Date,
+		&i.AccountBalance,
+		&i.Coinfirst,
+		&i.Coinsecond,
+		&i.Price,
+		&i.Amount,
+		&i.State,
+		&i.Orderid,
+		&i.Uplevel,
+		&i.Downlevel,
 	)
 	return i, err
 }
 
 const getCoins = `-- name: GetCoins :many
-SELECT id, date, symbol, status, baseasset, baseassetprecision, quoteasset, quoteprecision, quoteassetprecision, basecommissionprecision, quotecommissionprecision, ordertypes, isspottradingallowed, ismargintradingallowed, quoteamountprecision, basesizeprecision, permissions, maxquoteamount, makercommission, takercommission, quoteamountprecisionmarket, maxquoteamountmarket, fullname, tradesidetype, ispalisade FROM coins
+SELECT id, date, symbol, status, baseasset, baseassetprecision, quoteasset, quoteprecision, quoteassetprecision, basecommissionprecision, quotecommissionprecision, ordertypes, isspottradingallowed, ismargintradingallowed, quoteamountprecision, basesizeprecision, permissions, maxquoteamount, makercommission, takercommission, quoteamountprecisionmarket, maxquoteamountmarket, fullname, tradesidetype, ispalisade, lastcheck, support, resistance, rangevalue, rangepercent, avgprice, volatility, maxdrawdown, maxrise FROM coins
 WHERE 
     ($3::boolean IS NULL OR isSpotTradingAllowed = $3)
     AND ($4::boolean IS NULL OR isPalisade = $4)
@@ -59,18 +99,18 @@ OFFSET $2
 `
 
 type GetCoinsParams struct {
-	Limit                int
-	Offset               int
-	Isspottradingallowed *bool
-	Ispalisade           *bool
+	Limit   int32
+	Offset  int32
+	Column3 bool
+	Column4 bool
 }
 
 func (q *Queries) GetCoins(ctx context.Context, arg GetCoinsParams) ([]Coin, error) {
 	rows, err := q.db.Query(ctx, getCoins,
 		arg.Limit,
 		arg.Offset,
-		arg.Isspottradingallowed,
-		arg.Ispalisade,
+		arg.Column3,
+		arg.Column4,
 	)
 	if err != nil {
 		return nil, err
@@ -105,6 +145,15 @@ func (q *Queries) GetCoins(ctx context.Context, arg GetCoinsParams) ([]Coin, err
 			&i.Fullname,
 			&i.Tradesidetype,
 			&i.Ispalisade,
+			&i.Lastcheck,
+			&i.Support,
+			&i.Resistance,
+			&i.Rangevalue,
+			&i.Rangepercent,
+			&i.Avgprice,
+			&i.Volatility,
+			&i.Maxdrawdown,
+			&i.Maxrise,
 		); err != nil {
 			return nil, err
 		}
@@ -114,35 +163,6 @@ func (q *Queries) GetCoins(ctx context.Context, arg GetCoinsParams) ([]Coin, err
 		return nil, err
 	}
 	return items, nil
-}
-
-const getCoinState = `-- name: GetCoinState :one
-SELECT id, date, account_balance, coinfirst, coinsecond, price, amount, state, orderid, uplevel, downlevel FROM state
-WHERE coinFirst = $1 AND coinSecond = $2 LIMIT 1
-`
-
-type GetCoinStateParams struct {
-	Coinfirst  string
-	Coinsecond string
-}
-
-func (q *Queries) GetCoinState(ctx context.Context, arg GetCoinStateParams) (State, error) {
-	row := q.db.QueryRow(ctx, getCoinState, arg.Coinfirst, arg.Coinsecond)
-	var i State
-	err := row.Scan(
-		&i.ID,
-		&i.Date,
-		&i.AccountBalance,
-		&i.Coinfirst,
-		&i.Coinsecond,
-		&i.Price,
-		&i.Amount,
-		&i.State,
-		&i.Orderid,
-		&i.Uplevel,
-		&i.Downlevel,
-	)
-	return i, err
 }
 
 const getCountLogsByCoin = `-- name: GetCountLogsByCoin :one
@@ -216,7 +236,7 @@ VALUES (
            $23,
            $24
        )
-    RETURNING id, date, symbol, status, baseasset, baseassetprecision, quoteasset, quoteprecision, quoteassetprecision, basecommissionprecision, quotecommissionprecision, ordertypes, isspottradingallowed, ismargintradingallowed, quoteamountprecision, basesizeprecision, permissions, maxquoteamount, makercommission, takercommission, quoteamountprecisionmarket, maxquoteamountmarket, fullname, tradesidetype, ispalisade
+    RETURNING id, date, symbol, status, baseasset, baseassetprecision, quoteasset, quoteprecision, quoteassetprecision, basecommissionprecision, quotecommissionprecision, ordertypes, isspottradingallowed, ismargintradingallowed, quoteamountprecision, basesizeprecision, permissions, maxquoteamount, makercommission, takercommission, quoteamountprecisionmarket, maxquoteamountmarket, fullname, tradesidetype, ispalisade, lastcheck, support, resistance, rangevalue, rangepercent, avgprice, volatility, maxdrawdown, maxrise
 `
 
 type SaveCoinParams struct {
@@ -300,6 +320,65 @@ func (q *Queries) SaveCoin(ctx context.Context, arg SaveCoinParams) (Coin, error
 		&i.Fullname,
 		&i.Tradesidetype,
 		&i.Ispalisade,
+		&i.Lastcheck,
+		&i.Support,
+		&i.Resistance,
+		&i.Rangevalue,
+		&i.Rangepercent,
+		&i.Avgprice,
+		&i.Volatility,
+		&i.Maxdrawdown,
+		&i.Maxrise,
 	)
 	return i, err
+}
+
+const updateIsPalisade = `-- name: UpdateIsPalisade :exec
+UPDATE coins
+SET isPalisade = $1, lastCheck = $2
+WHERE symbol = $3
+`
+
+type UpdateIsPalisadeParams struct {
+	Ispalisade bool
+	Lastcheck  *time.Time
+	Symbol     string
+}
+
+func (q *Queries) UpdateIsPalisade(ctx context.Context, arg UpdateIsPalisadeParams) error {
+	_, err := q.db.Exec(ctx, updateIsPalisade, arg.Ispalisade, arg.Lastcheck, arg.Symbol)
+	return err
+}
+
+const updatePalisadeParams = `-- name: UpdatePalisadeParams :exec
+UPDATE coins
+SET support = $1, resistance = $2, rangeValue = $3, rangePercent = $4, avgPrice = $5, volatility = $6, maxDrawdown = $7, maxRise = $8
+WHERE symbol = $9
+`
+
+type UpdatePalisadeParamsParams struct {
+	Support      pgtype.Float8
+	Resistance   pgtype.Float8
+	Rangevalue   pgtype.Float8
+	Rangepercent pgtype.Float8
+	Avgprice     pgtype.Float8
+	Volatility   pgtype.Float8
+	Maxdrawdown  pgtype.Float8
+	Maxrise      pgtype.Float8
+	Symbol       string
+}
+
+func (q *Queries) UpdatePalisadeParams(ctx context.Context, arg UpdatePalisadeParamsParams) error {
+	_, err := q.db.Exec(ctx, updatePalisadeParams,
+		arg.Support,
+		arg.Resistance,
+		arg.Rangevalue,
+		arg.Rangepercent,
+		arg.Avgprice,
+		arg.Volatility,
+		arg.Maxdrawdown,
+		arg.Maxrise,
+		arg.Symbol,
+	)
+	return err
 }
