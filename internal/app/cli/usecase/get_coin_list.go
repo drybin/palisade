@@ -30,7 +30,7 @@ func NewGetCoinListUsecase(
 }
 
 func (u *GetCoinList) Process(ctx context.Context) error {
-	fmt.Println("get coin list")
+	fmt.Println("Get all coin list and save to db")
 
 	res, err := u.repo.GetAllTickerPrices(ctx)
 	if err != nil {
@@ -41,14 +41,14 @@ func (u *GetCoinList) Process(ctx context.Context) error {
 	fmt.Printf("Found pairs count: %d\n", len(*res))
 
 	for _, symbol := range *res {
-		fmt.Println("Check symbol: " + symbol.Symbol)
+		// fmt.Println("Check symbol: " + symbol.Symbol)
 
 		symbolFromDb, err := u.stateRepo.GetCoinInfo(ctx, symbol.Symbol)
 		if err != nil {
 			return wrap.Errorf("failed get symbol details from db: %w", err)
 		}
 		if symbolFromDb != nil {
-			fmt.Println("Symbol found in db, continue")
+			// fmt.Println("Symbol found in db, continue")
 			continue
 		}
 
@@ -62,8 +62,10 @@ func (u *GetCoinList) Process(ctx context.Context) error {
 			return wrap.Errorf("failed to save coin: %w", err)
 		}
 
-		fmt.Println("ok")
+		// fmt.Println("ok")
 		time.Sleep(2 * time.Second)
 	}
+
+	fmt.Println("All done")
 	return nil
 }
