@@ -25,8 +25,10 @@ type Container struct {
 type Usecases struct {
 	HelloWorld            *usecase.HelloWorld
 	PalisadeProcess       *usecase.PalisadeProcess
+	PalisadeProcessSell   *usecase.PalisadeProcessSell
 	GetCoinList           *usecase.GetCoinList
 	CheckPalisadeCoinList *usecase.CheckPalisadeCoinList
+	CheckPalisadeCoin     *usecase.CheckPalisadeCoin
 }
 
 func NewContainer(
@@ -61,8 +63,10 @@ func NewContainer(
 				service.NewByuService(mexcApi, mexcV2Api, stateRepo),
 				stateRepo,
 			),
+			PalisadeProcessSell:   usecase.NewPalisadeProcessSellUsecase(mexcApi, stateRepo),
 			GetCoinList:           usecase.NewGetCoinListUsecase(mexcApi, stateRepo),
 			CheckPalisadeCoinList: usecase.NewCheckPalisadeCoinListUsecase(mexcApi, stateRepo),
+			CheckPalisadeCoin:     usecase.NewCheckPalisadeCoinUsecase(mexcApi, stateRepo),
 		},
 		MexcSpot: mexcSpot,
 		Clean: func() {
@@ -78,6 +82,14 @@ func newDbConn(config *config.Config) (*pgx.Conn, error) {
 	conn, err := pgx.Connect(ctx, config.PostgreeDsn)
 	if err != nil {
 		return nil, err
+	}
+
+	// Устанавливаем часовой пояс сессии на GMT+7
+	// Это влияет на то, как PostgreSQL будет отображать TIMESTAMPTZ при чтении
+	_, err = conn.Exec(ctx, "SET timezone = 'Asia/Bangkok'")
+	if err != nil {
+		_ = conn.Close(ctx)
+		return nil, wrap.Errorf("failed to set timezone: %w", err)
 	}
 
 	return conn, nil

@@ -3,9 +3,8 @@ package webapi
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"mexc-sdk/mexcsdk"
-	"os"
+	"strconv"
 
 	"github.com/drybin/palisade/internal/app/cli/config"
 	"github.com/drybin/palisade/internal/domain/enum"
@@ -15,8 +14,8 @@ import (
 	"github.com/go-resty/resty/v2"
 )
 
-const mexc_spot_account_info_url = "/api/v3/account"
-const mexc_new_order_url = "/api/v3/order"
+// const mexc_spot_account_info_url = "/api/v3/account"
+// const mexc_new_order_url = "/api/v3/order"
 
 type MexcWebapi struct {
 	client       *resty.Client
@@ -44,17 +43,18 @@ func NewMexcWebapi(
 	}
 }
 
-func (m *MexcWebapi) GetBalance(ctx context.Context) (*mexc.SpotAccountInfo, error) {
+func (m *MexcWebapi) GetBalance(ctx context.Context) (*mexc.AccountInfo, error) {
 	res := m.spot.AccountInfo()
 	bytes, _ := json.Marshal(res)
 
-	result := mexc.SpotAccountInfo{}
-	err := json.Unmarshal(bytes, &result)
+	spotAccountInfo := mexc.SpotAccountInfo{}
+	err := json.Unmarshal(bytes, &spotAccountInfo)
 	if err != nil {
 		return nil, wrap.Errorf("failed to unmarshal accountInfo info: %w", err)
 	}
 
-	return &result, nil
+	accountInfo := mapSpotAccountInfoToAccountInfo(spotAccountInfo)
+	return accountInfo, nil
 }
 
 func (m *MexcWebapi) GetAllTickerPrices(ctx context.Context) (*mexc.TickersWithPrice, error) {
@@ -99,7 +99,7 @@ func (m *MexcWebapi) NewOrder(
 	resp := m.spot.NewOrder(orderParams.GetSymbol(), orderParams.GetSide(), orderParams.GetOrderType(), options)
 
 	if resp == nil {
-		return nil, wrap.Errorf("failed to place order on mexc: %w", resp)
+		return nil, wrap.Errorf("failed to place order on mexc: %v", resp)
 	}
 
 	bytes, _ := json.Marshal(resp)
@@ -107,10 +107,40 @@ func (m *MexcWebapi) NewOrder(
 	result := mexc.PlaceOrderResult{}
 	err := json.Unmarshal(bytes, &result)
 	if err != nil {
-		return nil, wrap.Errorf("failed to unmarshal order info: %w", err)
+		return nil, wrap.Errorf("failed to unmarshal order info: %v", err)
 	}
 
 	return &result, nil
+}
+
+func (m *MexcWebapi) CancelOrder(
+	symbol string,
+	orderId string,
+) (*mexc.CancelOrderResponse, error) {
+	// Параметры отмены
+	params := map[string]string{
+		"symbol":  symbol,
+		"orderId": orderId, // ID ордера
+	}
+
+	// Вызов cancel
+	resp := m.spot.CancelOrder(&symbol, params)
+
+	if resp == nil {
+		return nil, wrap.Errorf("failed to cancel order: response is nil")
+	}
+
+	bytes, err := json.Marshal(resp)
+	if err != nil {
+		return nil, wrap.Errorf("failed to marshal cancel order response: %w", err)
+	}
+
+	result, err := mexc.ParseCancelOrderResponseFromJSON(bytes)
+	if err != nil {
+		return nil, wrap.Errorf("failed to parse cancel order response: %w", err)
+	}
+
+	return result, nil
 }
 
 func (m *MexcWebapi) GetOpenOrders(
@@ -121,18 +151,48 @@ func (m *MexcWebapi) GetOpenOrders(
 	resp := m.spot.OpenOrders(orderParams.GetSymbol())
 
 	if resp == nil {
-		return nil, wrap.Errorf("failed to get open orders: %w", resp)
+		return nil, wrap.Errorf("failed to get open orders: %v", resp)
 	}
 
-	bytes, _ := json.Marshal(resp)
-
-	result := mexc.OpenOrders{}
-	err := json.Unmarshal(bytes, &result)
+	bytes, err := json.Marshal(resp)
 	if err != nil {
-		return nil, wrap.Errorf("failed to unmarshal open orders: %w", err)
+		return nil, wrap.Errorf("failed to marshal open orders response: %v", err)
+	}
+
+	result, err := mexc.ParseOpenOrdersFromJSON(bytes)
+	if err != nil {
+		return nil, wrap.Errorf("failed to parse open orders: %v", err)
 	}
 
 	return &result, nil
+}
+
+func (m *MexcWebapi) GetOrderQuery(
+	symbol string,
+	orderId string,
+) (*mexc.QueryOrderResult, error) {
+	params := map[string]string{
+		"symbol":  symbol,
+		"orderId": orderId, // ID ордера
+	}
+
+	resp := m.spot.QueryOrder(&symbol, params)
+
+	if resp == nil {
+		return nil, wrap.Errorf("failed to query order: response is nil")
+	}
+
+	bytes, err := json.Marshal(resp)
+	if err != nil {
+		return nil, wrap.Errorf("failed to marshal query order response: %w", err)
+	}
+
+	result, err := mexc.ParseQueryOrderFromJSON(bytes)
+	if err != nil {
+		return nil, wrap.Errorf("failed to parse query order response: %w", err)
+	}
+
+	return result, nil
 }
 
 func (m *MexcWebapi) GetKlines(
@@ -168,63 +228,120 @@ func (m *MexcWebapi) GetKlines(
 	return &klines, nil
 }
 
-func (m *MexcWebapi) GetTicker24hr(
-	pair model.PairWithLevels,
-	interval enum.KlineInterval,
-) (*mexc.OpenOrders, error) {
-	//symbol := pair.Pair.String()
-	//
-	//options := map[string]string{
-	//    "limit": "700",
-	//}
+func (m *MexcWebapi) GetAvgPrice(ctx context.Context, symbol string) (*mexc.AvgPrice, error) {
+	// Используем прямой HTTP запрос для публичного endpoint /api/v3/avgPrice
+	// Используем publicClient без заголовка X-MEXC-APIKEY
+	res, err := m.publicClient.R().
+		SetQueryParams(map[string]string{
+			"symbol": symbol,
+		}).
+		Get("/api/v3/avgPrice")
 
-	resp := m.spot.Ticker24hr(pair.Pair.CoinFirst.StringPtr())
-	//resp := m.spot.Klines(&symbol, interval.StringPtr(), options)
-	fmt.Printf("resp: %+v\n", resp)
-	os.Exit(1)
-
-	if resp == nil {
-		return nil, wrap.Errorf("failed to get open orders: %w", resp)
+	if err != nil {
+		return nil, wrap.Errorf("failed to get avg price: %w", err)
 	}
 
-	bytes, _ := json.Marshal(resp)
+	if res.IsError() {
+		return nil, wrap.Errorf("failed to get avg price, status: %d, body: %s", res.StatusCode(), string(res.Body()))
+	}
 
-	result := mexc.OpenOrders{}
-	err := json.Unmarshal(bytes, &result)
+	var response struct {
+		Mins  int    `json:"mins"`
+		Price string `json:"price"`
+	}
+	err = json.Unmarshal(res.Body(), &response)
 	if err != nil {
-		return nil, wrap.Errorf("failed to unmarshal open orders: %w", err)
+		return nil, wrap.Errorf("failed to unmarshal avg price info: %w", err)
+	}
+
+	price, err := strconv.ParseFloat(response.Price, 64)
+	if err != nil {
+		return nil, wrap.Errorf("failed to parse price: %w", err)
+	}
+
+	result := mexc.AvgPrice{
+		Mins:  response.Mins,
+		Price: price,
 	}
 
 	return &result, nil
 }
 
-func (m *MexcWebapi) GetTrades(
-	pair model.PairWithLevels,
-	interval enum.KlineInterval,
-) (*mexc.OpenOrders, error) {
-	//symbol := pair.Pair.String()
-	//
-	options := map[string]string{
-		"limit": "700",
+func mapSpotAccountInfoToAccountInfo(spotInfo mexc.SpotAccountInfo) *mexc.AccountInfo {
+	accountInfo := &mexc.AccountInfo{
+		CanTrade:    spotInfo.CanTrade,
+		CanWithdraw: spotInfo.CanWithdraw,
+		CanDeposit:  spotInfo.CanDeposit,
+		AccountType: spotInfo.AccountType,
+		Permissions: spotInfo.Permissions,
 	}
 
-	//resp := m.spot.Ticker24hr(pair.Pair.CoinFirst.StringPtr())
-	resp := m.spot.Trades(pair.Pair.CoinFirst.StringPtr(), &options)
-	//resp := m.spot.Klines(&symbol, interval.StringPtr(), options)
-	fmt.Printf("resp: %+v\n", resp)
-	os.Exit(1)
-
-	if resp == nil {
-		return nil, wrap.Errorf("failed to get open orders: %w", resp)
+	// Конвертируем комиссии из interface{} в int64
+	if makerComm, ok := spotInfo.MakerCommission.(float64); ok {
+		accountInfo.MakerCommission = int64(makerComm)
+	} else if makerComm, ok := spotInfo.MakerCommission.(int64); ok {
+		accountInfo.MakerCommission = makerComm
+	} else if makerCommStr, ok := spotInfo.MakerCommission.(string); ok {
+		if val, err := strconv.ParseInt(makerCommStr, 10, 64); err == nil {
+			accountInfo.MakerCommission = val
+		}
 	}
 
-	bytes, _ := json.Marshal(resp)
-
-	result := mexc.OpenOrders{}
-	err := json.Unmarshal(bytes, &result)
-	if err != nil {
-		return nil, wrap.Errorf("failed to unmarshal open orders: %w", err)
+	if takerComm, ok := spotInfo.TakerCommission.(float64); ok {
+		accountInfo.TakerCommission = int64(takerComm)
+	} else if takerComm, ok := spotInfo.TakerCommission.(int64); ok {
+		accountInfo.TakerCommission = takerComm
+	} else if takerCommStr, ok := spotInfo.TakerCommission.(string); ok {
+		if val, err := strconv.ParseInt(takerCommStr, 10, 64); err == nil {
+			accountInfo.TakerCommission = val
+		}
 	}
 
-	return &result, nil
+	if buyerComm, ok := spotInfo.BuyerCommission.(float64); ok {
+		accountInfo.BuyerCommission = int64(buyerComm)
+	} else if buyerComm, ok := spotInfo.BuyerCommission.(int64); ok {
+		accountInfo.BuyerCommission = buyerComm
+	} else if buyerCommStr, ok := spotInfo.BuyerCommission.(string); ok {
+		if val, err := strconv.ParseInt(buyerCommStr, 10, 64); err == nil {
+			accountInfo.BuyerCommission = val
+		}
+	}
+
+	if sellerComm, ok := spotInfo.SellerCommission.(float64); ok {
+		accountInfo.SellerCommission = int64(sellerComm)
+	} else if sellerComm, ok := spotInfo.SellerCommission.(int64); ok {
+		accountInfo.SellerCommission = sellerComm
+	} else if sellerCommStr, ok := spotInfo.SellerCommission.(string); ok {
+		if val, err := strconv.ParseInt(sellerCommStr, 10, 64); err == nil {
+			accountInfo.SellerCommission = val
+		}
+	}
+
+	// Конвертируем UpdateTime из interface{} в int64
+	if updateTime, ok := spotInfo.UpdateTime.(float64); ok {
+		accountInfo.UpdateTime = int64(updateTime)
+	} else if updateTime, ok := spotInfo.UpdateTime.(int64); ok {
+		accountInfo.UpdateTime = updateTime
+	} else if updateTimeStr, ok := spotInfo.UpdateTime.(string); ok {
+		if val, err := strconv.ParseInt(updateTimeStr, 10, 64); err == nil {
+			accountInfo.UpdateTime = val
+		}
+	}
+
+	// Конвертируем балансы
+	accountInfo.Balances = make([]mexc.Balance, 0, len(spotInfo.Balances))
+	for _, balance := range spotInfo.Balances {
+		free, _ := strconv.ParseFloat(balance.Free, 64)
+		locked, _ := strconv.ParseFloat(balance.Locked, 64)
+		available, _ := strconv.ParseFloat(balance.Available, 64)
+
+		accountInfo.Balances = append(accountInfo.Balances, mexc.Balance{
+			Asset:     balance.Asset,
+			Free:      free,
+			Locked:    locked,
+			Available: available,
+		})
+	}
+
+	return accountInfo
 }

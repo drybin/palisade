@@ -30,8 +30,10 @@ func Run(config *config.Config) error {
 	app.Commands = []*cliV2.Command{
 		command.NewHelloWorldCommand(cnt.Usecases.HelloWorld),
 		command.NewPalisadeProcessCommand(cnt.Usecases.PalisadeProcess),
+		command.NewPalisadeProcessSellCommand(cnt.Usecases.PalisadeProcessSell),
 		command.NewGetCoinListCommand(cnt.Usecases.GetCoinList),
 		command.NewCheckPalisadeCoinListCommand(cnt.Usecases.CheckPalisadeCoinList),
+		command.NewCheckPalisadeCoinCommand(cnt.Usecases.CheckPalisadeCoin),
 	}
 
 	return app.Run(os.Args)

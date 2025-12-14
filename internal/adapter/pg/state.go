@@ -13,7 +13,6 @@ import (
 	"github.com/drybin/palisade/pkg/wrap"
 	palisade_database "github.com/drybin/palisade/sqlc/gen"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
 )
 
 type StateRepository struct {
@@ -188,14 +187,14 @@ func (u StateRepository) UpdatePalisadeParams(
 	db := palisade_database.New(u.Postgree)
 
 	err := db.UpdatePalisadeParams(ctx, palisade_database.UpdatePalisadeParamsParams{
-		Support:      pgtype.Float8{Float64: support, Valid: true},
-		Resistance:   pgtype.Float8{Float64: resistance, Valid: true},
-		Rangevalue:   pgtype.Float8{Float64: rangeValue, Valid: true},
-		Rangepercent: pgtype.Float8{Float64: rangePercent, Valid: true},
-		Avgprice:     pgtype.Float8{Float64: avgPrice, Valid: true},
-		Volatility:   pgtype.Float8{Float64: volatility, Valid: true},
-		Maxdrawdown:  pgtype.Float8{Float64: maxDrawdown, Valid: true},
-		Maxrise:      pgtype.Float8{Float64: maxRise, Valid: true},
+		Support:      &support,
+		Resistance:   &resistance,
+		Rangevalue:   &rangeValue,
+		Rangepercent: &rangePercent,
+		Avgprice:     &avgPrice,
+		Volatility:   &volatility,
+		Maxdrawdown:  &maxDrawdown,
+		Maxrise:      &maxRise,
 		Symbol:       symbol,
 	})
 
@@ -204,6 +203,191 @@ func (u StateRepository) UpdatePalisadeParams(
 	}
 
 	return nil
+}
+
+func (u StateRepository) GetCoinsToProcess(
+	ctx context.Context,
+	limit int,
+	offset int,
+) ([]mexc.SymbolDetail, error) {
+	db := palisade_database.New(u.Postgree)
+
+	coins, err := db.GetCoinsToProcess(ctx, palisade_database.GetCoinsToProcessParams{
+		Limit:  int32(limit),
+		Offset: int32(offset),
+	})
+
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return []mexc.SymbolDetail{}, nil
+		}
+		return nil, wrap.Errorf("failed to get coins to process from Postgree: %w", err)
+	}
+
+	result := make([]mexc.SymbolDetail, 0, len(coins))
+	for _, coin := range coins {
+		symbolDetail, err := mapCoinToDomainModel(coin)
+		if err != nil {
+			return nil, wrap.Errorf("failed to map coin to domain model: %w", err)
+		}
+		result = append(result, *symbolDetail)
+	}
+
+	return result, nil
+}
+
+func (u StateRepository) GetNextTradeId(ctx context.Context) (int, error) {
+	db := palisade_database.New(u.Postgree)
+
+	lastTradeId, err := db.GetLastTradeId(ctx)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			// Если нет записей, возвращаем 1
+			return 1, nil
+		}
+		return 0, wrap.Errorf("failed to get last trade id from Postgree: %w", err)
+	}
+
+	// Если результат NULL, возвращаем 1
+	if lastTradeId == nil {
+		return 1, nil
+	}
+
+	// Конвертируем interface{} в int
+	var maxId int
+	switch v := lastTradeId.(type) {
+	case int64:
+		maxId = int(v)
+	case int32:
+		maxId = int(v)
+	case int:
+		maxId = v
+	case float64:
+		maxId = int(v)
+	default:
+		// Пытаемся конвертировать через строку
+		maxIdStr := fmt.Sprintf("%v", lastTradeId)
+		parsed, err := strconv.Atoi(maxIdStr)
+		if err != nil {
+			return 0, wrap.Errorf("failed to convert last trade id to int: %w", err)
+		}
+		maxId = parsed
+	}
+
+	// Возвращаем +1 от максимального ID
+	return maxId + 1, nil
+}
+
+func (u StateRepository) SaveTradeLog(ctx context.Context, params repo.SaveTradeLogParams) (*repo.TradeLog, error) {
+	db := palisade_database.New(u.Postgree)
+
+	tradeLog, err := db.SaveTradeLog(ctx, palisade_database.SaveTradeLogParams{
+		OpenDate:    params.OpenDate,
+		OpenBalance: params.OpenBalance,
+		Symbol:      params.Symbol,
+		BuyPrice:    params.BuyPrice,
+		Amount:      params.Amount,
+		Orderid:     params.OrderId,
+		Uplevel:     params.UpLevel,
+		Downlevel:   params.DownLevel,
+	})
+	if err != nil {
+		return nil, wrap.Errorf("failed to save trade log: %w", err)
+	}
+
+	return mapTradeLogToDomainModel(tradeLog), nil
+}
+
+func (u StateRepository) UpdateDealDateTradeLog(ctx context.Context, id int, dealDate time.Time) error {
+	db := palisade_database.New(u.Postgree)
+
+	err := db.UpdateDealDateTradeLog(ctx, palisade_database.UpdateDealDateTradeLogParams{
+		ID:       id,
+		DealDate: &dealDate,
+	})
+	if err != nil {
+		return wrap.Errorf("failed to update deal date for trade log id %d: %w", id, err)
+	}
+
+	return nil
+}
+
+func (u StateRepository) UpdateCancelDateTradeLog(ctx context.Context, id int, cancelDate time.Time) error {
+	db := palisade_database.New(u.Postgree)
+
+	err := db.UpdateCancelDateTradeLog(ctx, palisade_database.UpdateCancelDateTradeLogParams{
+		ID:         id,
+		CancelDate: &cancelDate,
+	})
+	if err != nil {
+		return wrap.Errorf("failed to update cancel date for trade log id %d: %w", id, err)
+	}
+
+	return nil
+}
+
+func (u StateRepository) UpdateSuccesTradeLog(ctx context.Context, id int, closeDate time.Time, closeBalance float64, sellPrice float64) error {
+	db := palisade_database.New(u.Postgree)
+
+	err := db.UpdateSuccesTradeLog(ctx, palisade_database.UpdateSuccesTradeLogParams{
+		ID:           id,
+		CloseDate:    &closeDate,
+		CloseBalance: &closeBalance,
+		SellPrice:    &sellPrice,
+	})
+	if err != nil {
+		return wrap.Errorf("failed to update success trade log id %d: %w", id, err)
+	}
+
+	return nil
+}
+
+func (u StateRepository) GetOpenOrders(ctx context.Context) ([]repo.TradeLog, error) {
+	db := palisade_database.New(u.Postgree)
+
+	tradeLogs, err := db.GetOpenOrders(ctx)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return []repo.TradeLog{}, nil
+		}
+		return nil, wrap.Errorf("failed to get open orders from Postgree: %w", err)
+	}
+
+	result := make([]repo.TradeLog, 0, len(tradeLogs))
+	for _, tradeLog := range tradeLogs {
+		domainTradeLog := mapTradeLogToDomainModel(tradeLog)
+		result = append(result, *domainTradeLog)
+	}
+
+	return result, nil
+}
+
+func mapTradeLogToDomainModel(t palisade_database.TradeLog) *repo.TradeLog {
+	closeBalance := 0.0
+	if t.CloseBalance != nil {
+		closeBalance = *t.CloseBalance
+	}
+	sellPrice := 0.0
+	if t.SellPrice != nil {
+		sellPrice = *t.SellPrice
+	}
+
+	return &repo.TradeLog{
+		ID:           t.ID,
+		OpenDate:     t.OpenDate,
+		DealDate:     t.DealDate,
+		CloseDate:    t.CloseDate,
+		CancelDate:   t.CancelDate,
+		OpenBalance:  t.OpenBalance,
+		CloseBalance: closeBalance,
+		Symbol:       t.Symbol,
+		BuyPrice:     t.BuyPrice,
+		SellPrice:    sellPrice,
+		Amount:       t.Amount,
+		OrderId:      t.Orderid,
+		UpLevel:      t.Uplevel,
+		DownLevel:    t.Downlevel,
+	}
 }
 
 func mapCoinToDomainModel(c palisade_database.Coin) (*mexc.SymbolDetail, error) {
@@ -238,6 +422,15 @@ func mapCoinToDomainModel(c palisade_database.Coin) (*mexc.SymbolDetail, error) 
 		ContractAddress:            "",
 		St:                         false,
 		LastCheck:                  getLastCheck(c),
+		IsPalisade:                 c.Ispalisade,
+		Support:                    getFloat64FromPointer(c.Support),
+		Resistance:                 getFloat64FromPointer(c.Resistance),
+		RangeValue:                 getFloat64FromPointer(c.Rangevalue),
+		RangePercent:               getFloat64FromPointer(c.Rangepercent),
+		AvgPrice:                   getFloat64FromPointer(c.Avgprice),
+		Volatility:                 getFloat64FromPointer(c.Volatility),
+		MaxDrawdown:                getFloat64FromPointer(c.Maxdrawdown),
+		MaxRise:                    getFloat64FromPointer(c.Maxrise),
 	}, nil
 }
 
@@ -247,6 +440,14 @@ func getLastCheck(c palisade_database.Coin) time.Time {
 		return *c.Lastcheck
 	}
 	return c.Date
+}
+
+// getFloat64FromPointer конвертирует *float64 в float64 (возвращает 0.0 если nil)
+func getFloat64FromPointer(f *float64) float64 {
+	if f != nil {
+		return *f
+	}
+	return 0.0
 }
 
 func mapToDomainModel(m palisade_database.State) *model.State {

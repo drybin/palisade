@@ -18,3 +18,24 @@ type SpotAccountInfo struct {
 	} `json:"balances"`
 	Permissions []string `json:"permissions"`
 }
+
+type Balance struct {
+	Asset     string
+	Free      float64
+	Locked    float64
+	Available float64
+}
+
+type AccountInfo struct {
+	MakerCommission  int64
+	TakerCommission  int64
+	BuyerCommission  int64
+	SellerCommission int64
+	CanTrade         bool
+	CanWithdraw      bool
+	CanDeposit       bool
+	UpdateTime       int64
+	AccountType      string
+	Balances         []Balance
+	Permissions      []string
+}

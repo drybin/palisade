@@ -2,16 +2,12 @@ package usecase
 
 import (
 	"context"
-	"encoding/csv"
 	"fmt"
-	"io"
-	"log"
-	"os"
-	"sort"
+	"time"
 
 	"github.com/drybin/palisade/internal/adapter/webapi"
-	"github.com/drybin/palisade/internal/domain/enum"
 	"github.com/drybin/palisade/internal/domain/enum/order"
+	"github.com/drybin/palisade/internal/domain/helpers"
 	"github.com/drybin/palisade/internal/domain/model"
 	"github.com/drybin/palisade/internal/domain/repo"
 	"github.com/drybin/palisade/internal/domain/service"
@@ -51,279 +47,132 @@ func NewPalisadeProcessUsecase(
 
 func (u *PalisadeProcess) Process(ctx context.Context) error {
 	fmt.Println("palisade process")
+
 	accountInfo, err := u.repo.GetBalance(ctx)
 	if err != nil {
 		return wrap.Errorf("failed to get balance: %w", err)
 	}
-	fmt.Printf("accountInfo: %+v\n", accountInfo)
 
-	pair := u.traidingPairsService.GetPalisade()
-	// fmt.Printf("pair: %+v\n", pair)
-	fmt.Printf("Process pair: %s\n", pair.Pair.String())
-
-	levels, err := u.palisadeLevelsService.CheckLevels(pair, enum.D7)
+	ordersFromTradeLog, err := u.stateRepo.GetOpenOrders(ctx)
 	if err != nil {
-		return wrap.Errorf("failed to get levels: %w", err)
+		return wrap.Errorf("failed to get orders from trade_log: %w", err)
 	}
-	// fmt.Printf("levels: %+v\n", levels)
 
-	fmt.Printf("Found levels: %f - %f\n", levels.Min, levels.Max)
+	cntOrdesFromTradeLog := len(ordersFromTradeLog)
+	fmt.Printf("\n=== Найдено ордеров в trade_log %d ===\n", cntOrdesFromTradeLog)
+	if cntOrdesFromTradeLog > 1 {
+		fmt.Println("Найдено 1 или больше открытых ордеров, прекращаем работу")
+		return nil
+	}
 
-	priceCheck, err := u.palisadeLevelsService.CheckPriceInLevels(pair, levels)
+	usdtBalance, err := helpers.FindUSDTBalance(accountInfo.Balances)
 	if err != nil {
-		return wrap.Errorf("failed to check price in levels: %w", err)
+		return wrap.Errorf("failed to find USDT balance: %w", err)
+	}
+	fmt.Printf("USDT Balance: %f\n", usdtBalance.Free)
+
+	if usdtBalance.Free < 10.0 {
+		fmt.Println("Balance less than 10$, stop")
+		return nil
 	}
 
-	if !priceCheck {
-		fmt.Println("Price not in palisade levels, skip")
-	}
-
-	_, err = u.buyService.Buy(ctx, pair, levels)
+	coins, err := u.stateRepo.GetCoinsToProcess(ctx, 10, 0)
 	if err != nil {
-		return wrap.Errorf("failed to byu coin: %w", err)
+		return wrap.Errorf("failed to get coins to process: %w", err)
+	}
+	if len(coins) == 0 {
+		return wrap.Errorf("no coins to process")
 	}
 
-	os.Exit(1)
+	coin := coins[0]
+	fmt.Printf("\n=== Анализ для %s ===\n", coin.Symbol)
+	fmt.Printf("Во флете: %v\n", coin.IsPalisade)
+	supportPlus01Percent := coin.Support * 1.001
+	fmt.Printf("Нижняя граница (Support): %.8f  (+0.1%% %.8f)\n", coin.Support, supportPlus01Percent)
+	//fmt.Printf("Нижняя граница +0.1%%: %.8f\n", supportPlus01Percent)
+	resistanceMinus01Percent := coin.Resistance * 0.999
+	//fmt.Printf("Верхняя граница -0.1%%: %.8f\n", resistanceMinus01Percent)
+	fmt.Printf("Верхняя граница (Resistance): %.8f (-0.1%% %.8f)\n", coin.Resistance, resistanceMinus01Percent)
+	fmt.Printf("Диапазон: %.8f\n", coin.RangeValue)
+	fmt.Printf("Диапазон в процентах: %.2f%%\n", coin.RangePercent)
+	fmt.Printf("Средняя цена: %.8f\n", coin.AvgPrice)
+	fmt.Printf("Волатильность: %.2f%%\n", coin.Volatility)
+	fmt.Printf("Максимальная просадка: %.2f%%\n", coin.MaxDrawdown)
+	fmt.Printf("Максимальный рост: %.2f%%\n", coin.MaxRise)
+	fmt.Printf("================================\n\n")
 
-	orderResult, err := u.repo.NewOrder(
+	currentAvgPrice, err := u.repo.GetAvgPrice(ctx, coin.Symbol)
+	if err != nil {
+		return wrap.Errorf("failed to get avg price: %w", err)
+	}
+
+	currentPrice := currentAvgPrice.Price
+	fmt.Printf("Текущая средняя цена: %.8f\n", currentPrice)
+	fmt.Printf("Диапазон: %.8f - %.8f\n", supportPlus01Percent, resistanceMinus01Percent)
+
+	// Проверяем, что текущая цена находится внутри диапазона
+	//if currentPrice >= supportPlus01Percent && currentPrice <= resistanceMinus01Percent {
+	if currentPrice >= coin.Support && currentPrice <= coin.Resistance {
+		fmt.Printf("✓ Цена находится в диапазоне\n")
+	} else {
+		fmt.Printf("✗ Цена ВНЕ диапазона\n")
+		if currentPrice < supportPlus01Percent {
+			fmt.Printf("  Цена ниже нижней границы на %.8f (%.2f%%)\n",
+				supportPlus01Percent-currentPrice,
+				((supportPlus01Percent-currentPrice)/supportPlus01Percent)*100)
+		} else {
+			fmt.Printf("  Цена выше верхней границы на %.8f (%.2f%%)\n",
+				currentPrice-resistanceMinus01Percent,
+				((currentPrice-resistanceMinus01Percent)/resistanceMinus01Percent)*100)
+		}
+	}
+
+	quantity := 2.0 / coin.Support
+	nextOrderId, err := u.stateRepo.GetNextTradeId(ctx)
+	if err != nil {
+		return wrap.Errorf("failed to get next trade id: %w", err)
+	}
+	clientOrderId := fmt.Sprintf("Test_order_auto_3_%d", nextOrderId)
+
+	fmt.Printf("\n--- Размещаем ордер %s ---\n", coin.Symbol)
+	fmt.Printf("Цена: %.8f\n", coin.Support)
+	fmt.Printf("Количество: %.8f\n", quantity)
+
+	placeOrderResult, err := u.repo.NewOrder(
 		model.OrderParams{
-			Symbol:           "DOLZUSDT",
+			Symbol:           coin.Symbol,
 			Side:             order.BUY,
 			OrderType:        order.LIMIT,
-			Quantity:         1799.0,
-			QuoteOrderQty:    1799.0,
-			Price:            0.00556,
-			NewClientOrderId: "Test order 1",
+			Quantity:         quantity,
+			QuoteOrderQty:    quantity,
+			Price:            coin.Support,
+			NewClientOrderId: clientOrderId,
 		},
 	)
 
-	fmt.Printf("orderResult: %+v\n", orderResult)
-	openOrders, err := u.repo.GetOpenOrders(
+	if err != nil {
+		return wrap.Errorf("failed to place order: %w", err)
+	}
+
+	fmt.Printf("\nордер размещен id %s\n", placeOrderResult.OrderID)
+
+	_, err = u.stateRepo.SaveTradeLog(
 		ctx,
-		model.OrderParams{
-			Symbol: "DOLZUSDT",
+		repo.SaveTradeLogParams{
+			OpenDate:    time.Now(),
+			OpenBalance: usdtBalance.Free,
+			Symbol:      coin.Symbol,
+			BuyPrice:    coin.Support,
+			Amount:      quantity,
+			OrderId:     placeOrderResult.OrderID,
+			UpLevel:     coin.Resistance,
+			DownLevel:   coin.Support,
 		},
 	)
-	fmt.Printf("openOrders: %+v\n", openOrders)
-	os.Exit(1)
 
-	data, err := getCvsData()
 	if err != nil {
-		return wrap.Errorf("failed to get csv data: %w", err)
-	}
-	//fmt.Printf("data: %+v\n", data)
-
-	sort.Slice(data, func(i, j int) bool {
-		return data[i].Date.Before(data[j].Date)
-	})
-
-	//fmt.Printf("%v\n", data[0])
-	//os.Exit(1)
-	fmt.Printf("data: %+v\n", data)
-
-	maxResult := 0.0
-	buyIndex := 0
-	sellIndex := 0
-
-	for b := 0; b < 100; b++ {
-		for s := 0; s < 100; s++ {
-			result := 100.0
-			inPosition := false
-			buyValue := 0.0
-			//lastByuPrice := 0.0
-			for _, item := range data {
-				if !inPosition && item.Index < b {
-					inPosition = true
-					buyValue = result / item.Price
-					//lastByuPrice = item.Price
-					fmt.Printf("Index %d price: %f amount %f\n", item.Index, item.Price, buyValue)
-					//os.Exit(1)
-					fmt.Println("buy")
-				}
-				if inPosition && item.Index > s {
-					inPosition = false
-					result = buyValue * item.Price
-					fmt.Printf("Index %d price: %f amount %f result %f\n",
-						item.Index,
-						item.Price,
-						buyValue,
-						result,
-					)
-					//os.Exit(1)
-					fmt.Println("sell")
-				}
-			}
-
-			if result > maxResult {
-				maxResult = result
-				buyIndex = b
-				sellIndex = s
-			}
-		}
+		return wrap.Errorf("failed to save trade order: %w", err)
 	}
 
-	fmt.Printf("result: %.2f\n", maxResult)
-	fmt.Printf("buyIndex: %d\n", buyIndex)
-	fmt.Printf("sellIndex: %d\n", sellIndex)
-
-	result := 100.0
-	inPosition := false
-	buyValue := 0.0
-	lastByuPrice := 0.0
-	for _, item := range data {
-		if !inPosition {
-			inPosition = true
-			buyValue = result / item.Price
-			lastByuPrice = item.Price
-			fmt.Printf("Index %d price: %f amount %f\n", item.Index, item.Price, buyValue)
-			//os.Exit(1)
-			fmt.Println("buy")
-		}
-		if inPosition && item.Price > lastByuPrice {
-			inPosition = false
-			result = buyValue * item.Price
-			fmt.Printf("Index %d price: %f amount %f result %f\n",
-				item.Index,
-				item.Price,
-				buyValue,
-				result,
-			)
-			//os.Exit(1)
-			fmt.Println("sell")
-		}
-	}
-
-	fmt.Printf("result: %.2f\n", result)
-
-	maxResult = 0.0
-	bestPercent := 0
-	result = 100.0
-	inPosition = false
-	buyValue = 0.0
-	lastByuPrice = 0.0
-
-	for percent := 1; percent < 100; percent++ {
-		result := 100.0
-		inPosition := false
-		buyValue := 0.0
-		lastByuPrice := 0.0
-		for _, item := range data {
-			if !inPosition {
-				inPosition = true
-				buyValue = result / item.Price
-				lastByuPrice = item.Price
-				fmt.Printf("Index %d price: %f amount %f\n", item.Index, item.Price, buyValue)
-				//os.Exit(1)
-				fmt.Println("buy")
-			}
-			if inPosition && item.Price > (lastByuPrice+lastByuPrice/100.0*float64(percent)) {
-				inPosition = false
-				result = buyValue * item.Price
-				fmt.Printf("Index %d price: %f amount %f result %f\n",
-					item.Index,
-					item.Price,
-					buyValue,
-					result,
-				)
-				//os.Exit(1)
-				fmt.Println("sell")
-			}
-		}
-		if result > maxResult {
-			maxResult = result
-			bestPercent = percent
-		}
-	}
-
-	fmt.Printf("result: %.2f\n", maxResult)
-	fmt.Printf("percent: %d\n", bestPercent)
-
-	maxResult = 0.0
-	bestPercent = 0
-	bestBuyPercent := 0
-	result = 100.0
-	inPosition = false
-	buyValue = 0.0
-	lastByuPrice = 0.0
-
-	for buyPercent := 1; buyPercent < 30; buyPercent++ {
-		for percent := 1; percent < 50; percent++ {
-			result := 100.0
-			inPosition := false
-			buyValue := 0.0
-			lastByuPrice := 3000.0
-			for _, item := range data {
-				if !inPosition && item.Price < (lastByuPrice-lastByuPrice/100.0*float64(buyPercent)) {
-					inPosition = true
-					buyValue = result / item.Price
-					lastByuPrice = item.Price
-					fmt.Printf("Index %d price: %f amount %f\n", item.Index, item.Price, buyValue)
-					//os.Exit(1)
-					fmt.Println("buy")
-				}
-				if inPosition && item.Price > (lastByuPrice+lastByuPrice/100.0*float64(percent)) {
-					inPosition = false
-					result = buyValue * item.Price
-					fmt.Printf("Index %d price: %f amount %f result %f\n",
-						item.Index,
-						item.Price,
-						buyValue,
-						result,
-					)
-					//os.Exit(1)
-					fmt.Println("sell")
-				}
-			}
-			if result > maxResult {
-				maxResult = result
-				bestPercent = percent
-				bestBuyPercent = buyPercent
-			}
-		}
-	}
-
-	fmt.Printf("result: %.2f\n", maxResult)
-	fmt.Printf("percent: %d\n", bestPercent)
-	fmt.Printf("bestBuyPercent: %d\n", bestBuyPercent)
-
-	log.Println("Fear research!!!")
 	return nil
-}
-
-func getCvsData() ([]model.DayInfo, error) {
-	result := []model.DayInfo{}
-
-	// open file
-	//f, err := os.Open("btc_fear_greed.csv")
-	//f, err := os.Open("btc_fear_greed_hour_minutes.csv")
-	//f, err := os.Open("btc_fear_greed_hour_minutes_last_year.csv")
-	f, err := os.Open("btc_fear_greed_hour_eth.csv")
-	if err != nil {
-		return nil, wrap.Errorf("failed to open csv file: %w", err)
-	}
-
-	// remember to close the file at the end of the program
-	defer f.Close()
-
-	// read csv values using csv.Reader
-	csvReader := csv.NewReader(f)
-	for {
-		rec, err := csvReader.Read()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return nil, wrap.Errorf("failed to read next string from csv file: %w", err)
-		}
-		// do something with read line
-		fmt.Printf("%+v\n", rec)
-
-		dayInfo, err := model.NewDayInfo(rec)
-		if err != nil {
-			return nil, wrap.Errorf("failed to parse dayInfo %v: %w", rec, err)
-		}
-		result = append(result, *dayInfo)
-	}
-
-	return result, nil
 }

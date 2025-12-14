@@ -119,20 +119,6 @@ func (u *CheckPalisadeCoinList) Process(ctx context.Context) error {
 		time.Sleep(3 * time.Second)
 	}
 
-	//
-	//for _, coin := range data {
-	//
-	//    u.repo.GetKlines(
-	//        model.PairWithLevels{
-	//            Pair: model.Pair{
-	//                CoinFirst:  model.Coin{Name: coin.Symbol, SymbolId: coin.Symbol},
-	//                CoinSecond: model.Coin{Name: coin.BaseAsset, SymbolId: coin.BaseAsset},
-	//            },
-	//        },
-	//        enum.DAY_1,
-	//    )
-	//}
-
 	return nil
 }
 

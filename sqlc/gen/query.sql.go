@@ -8,8 +8,6 @@ package palisade_database
 import (
 	"context"
 	"time"
-
-	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const getCoinInfo = `-- name: GetCoinInfo :one
@@ -165,6 +163,80 @@ func (q *Queries) GetCoins(ctx context.Context, arg GetCoinsParams) ([]Coin, err
 	return items, nil
 }
 
+const getCoinsToProcess = `-- name: GetCoinsToProcess :many
+SELECT id, date, symbol, status, baseasset, baseassetprecision, quoteasset, quoteprecision, quoteassetprecision, basecommissionprecision, quotecommissionprecision, ordertypes, isspottradingallowed, ismargintradingallowed, quoteamountprecision, basesizeprecision, permissions, maxquoteamount, makercommission, takercommission, quoteamountprecisionmarket, maxquoteamountmarket, fullname, tradesidetype, ispalisade, lastcheck, support, resistance, rangevalue, rangepercent, avgprice, volatility, maxdrawdown, maxrise FROM coins
+WHERE 
+    isSpotTradingAllowed = true
+    AND isPalisade = true
+    --AND volatility > 0.1
+    --AND volatility < 0.4
+    AND quoteasset = 'USDT'
+    AND symbol = 'TPTUUSDT'
+ORDER BY lastcheck DESC
+LIMIT $1
+OFFSET $2
+`
+
+type GetCoinsToProcessParams struct {
+	Limit  int32
+	Offset int32
+}
+
+func (q *Queries) GetCoinsToProcess(ctx context.Context, arg GetCoinsToProcessParams) ([]Coin, error) {
+	rows, err := q.db.Query(ctx, getCoinsToProcess, arg.Limit, arg.Offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Coin
+	for rows.Next() {
+		var i Coin
+		if err := rows.Scan(
+			&i.ID,
+			&i.Date,
+			&i.Symbol,
+			&i.Status,
+			&i.Baseasset,
+			&i.Baseassetprecision,
+			&i.Quoteasset,
+			&i.Quoteprecision,
+			&i.Quoteassetprecision,
+			&i.Basecommissionprecision,
+			&i.Quotecommissionprecision,
+			&i.Ordertypes,
+			&i.Isspottradingallowed,
+			&i.Ismargintradingallowed,
+			&i.Quoteamountprecision,
+			&i.Basesizeprecision,
+			&i.Permissions,
+			&i.Maxquoteamount,
+			&i.Makercommission,
+			&i.Takercommission,
+			&i.Quoteamountprecisionmarket,
+			&i.Maxquoteamountmarket,
+			&i.Fullname,
+			&i.Tradesidetype,
+			&i.Ispalisade,
+			&i.Lastcheck,
+			&i.Support,
+			&i.Resistance,
+			&i.Rangevalue,
+			&i.Rangepercent,
+			&i.Avgprice,
+			&i.Volatility,
+			&i.Maxdrawdown,
+			&i.Maxrise,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getCountLogsByCoin = `-- name: GetCountLogsByCoin :one
 SELECT COUNT(*) FROM logs
 WHERE coinFirst = $1 AND coinSecond = $2 LIMIT 1
@@ -180,6 +252,60 @@ func (q *Queries) GetCountLogsByCoin(ctx context.Context, arg GetCountLogsByCoin
 	var count int64
 	err := row.Scan(&count)
 	return count, err
+}
+
+const getLastTradeId = `-- name: GetLastTradeId :one
+SELECT MAX(id) FROM trade_log
+`
+
+func (q *Queries) GetLastTradeId(ctx context.Context) (interface{}, error) {
+	row := q.db.QueryRow(ctx, getLastTradeId)
+	var max interface{}
+	err := row.Scan(&max)
+	return max, err
+}
+
+const getOpenOrders = `-- name: GetOpenOrders :many
+SELECT id, open_date, deal_date, close_date, cancel_date, open_balance, close_balance, symbol, buy_price, sell_price, amount, orderid, uplevel, downlevel FROM trade_log
+WHERE 
+    deal_date IS NULL
+    AND close_date IS NULL
+    AND cancel_date IS NULL
+`
+
+func (q *Queries) GetOpenOrders(ctx context.Context) ([]TradeLog, error) {
+	rows, err := q.db.Query(ctx, getOpenOrders)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []TradeLog
+	for rows.Next() {
+		var i TradeLog
+		if err := rows.Scan(
+			&i.ID,
+			&i.OpenDate,
+			&i.DealDate,
+			&i.CloseDate,
+			&i.CancelDate,
+			&i.OpenBalance,
+			&i.CloseBalance,
+			&i.Symbol,
+			&i.BuyPrice,
+			&i.SellPrice,
+			&i.Amount,
+			&i.Orderid,
+			&i.Uplevel,
+			&i.Downlevel,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const saveCoin = `-- name: SaveCoin :one
@@ -333,6 +459,104 @@ func (q *Queries) SaveCoin(ctx context.Context, arg SaveCoinParams) (Coin, error
 	return i, err
 }
 
+const saveTradeLog = `-- name: SaveTradeLog :one
+INSERT INTO trade_log (
+   open_date,
+   open_balance,
+   symbol,
+   buy_price,
+   amount,
+   orderId,
+   upLevel,
+   downLevel
+   )
+   VALUES (
+           $1,
+           $2,
+           $3,
+           $4,
+           $5,
+           $6,
+           $7,
+           $8
+   )
+   RETURNING id, open_date, deal_date, close_date, cancel_date, open_balance, close_balance, symbol, buy_price, sell_price, amount, orderid, uplevel, downlevel
+`
+
+type SaveTradeLogParams struct {
+	OpenDate    time.Time
+	OpenBalance float64
+	Symbol      string
+	BuyPrice    float64
+	Amount      float64
+	Orderid     string
+	Uplevel     float64
+	Downlevel   float64
+}
+
+func (q *Queries) SaveTradeLog(ctx context.Context, arg SaveTradeLogParams) (TradeLog, error) {
+	row := q.db.QueryRow(ctx, saveTradeLog,
+		arg.OpenDate,
+		arg.OpenBalance,
+		arg.Symbol,
+		arg.BuyPrice,
+		arg.Amount,
+		arg.Orderid,
+		arg.Uplevel,
+		arg.Downlevel,
+	)
+	var i TradeLog
+	err := row.Scan(
+		&i.ID,
+		&i.OpenDate,
+		&i.DealDate,
+		&i.CloseDate,
+		&i.CancelDate,
+		&i.OpenBalance,
+		&i.CloseBalance,
+		&i.Symbol,
+		&i.BuyPrice,
+		&i.SellPrice,
+		&i.Amount,
+		&i.Orderid,
+		&i.Uplevel,
+		&i.Downlevel,
+	)
+	return i, err
+}
+
+const updateCancelDateTradeLog = `-- name: UpdateCancelDateTradeLog :exec
+UPDATE trade_log
+SET cancel_date = $1
+WHERE id = $2
+`
+
+type UpdateCancelDateTradeLogParams struct {
+	CancelDate *time.Time
+	ID         int
+}
+
+func (q *Queries) UpdateCancelDateTradeLog(ctx context.Context, arg UpdateCancelDateTradeLogParams) error {
+	_, err := q.db.Exec(ctx, updateCancelDateTradeLog, arg.CancelDate, arg.ID)
+	return err
+}
+
+const updateDealDateTradeLog = `-- name: UpdateDealDateTradeLog :exec
+UPDATE trade_log
+SET deal_date = $1
+WHERE id = $2
+`
+
+type UpdateDealDateTradeLogParams struct {
+	DealDate *time.Time
+	ID       int
+}
+
+func (q *Queries) UpdateDealDateTradeLog(ctx context.Context, arg UpdateDealDateTradeLogParams) error {
+	_, err := q.db.Exec(ctx, updateDealDateTradeLog, arg.DealDate, arg.ID)
+	return err
+}
+
 const updateIsPalisade = `-- name: UpdateIsPalisade :exec
 UPDATE coins
 SET isPalisade = $1, lastCheck = $2
@@ -357,14 +581,14 @@ WHERE symbol = $9
 `
 
 type UpdatePalisadeParamsParams struct {
-	Support      pgtype.Float8
-	Resistance   pgtype.Float8
-	Rangevalue   pgtype.Float8
-	Rangepercent pgtype.Float8
-	Avgprice     pgtype.Float8
-	Volatility   pgtype.Float8
-	Maxdrawdown  pgtype.Float8
-	Maxrise      pgtype.Float8
+	Support      *float64
+	Resistance   *float64
+	Rangevalue   *float64
+	Rangepercent *float64
+	Avgprice     *float64
+	Volatility   *float64
+	Maxdrawdown  *float64
+	Maxrise      *float64
 	Symbol       string
 }
 
@@ -379,6 +603,29 @@ func (q *Queries) UpdatePalisadeParams(ctx context.Context, arg UpdatePalisadePa
 		arg.Maxdrawdown,
 		arg.Maxrise,
 		arg.Symbol,
+	)
+	return err
+}
+
+const updateSuccesTradeLog = `-- name: UpdateSuccesTradeLog :exec
+UPDATE trade_log
+SET close_date = $1, close_balance = $2, sell_price = $3
+WHERE id = $4
+`
+
+type UpdateSuccesTradeLogParams struct {
+	CloseDate    *time.Time
+	CloseBalance *float64
+	SellPrice    *float64
+	ID           int
+}
+
+func (q *Queries) UpdateSuccesTradeLog(ctx context.Context, arg UpdateSuccesTradeLogParams) error {
+	_, err := q.db.Exec(ctx, updateSuccesTradeLog,
+		arg.CloseDate,
+		arg.CloseBalance,
+		arg.SellPrice,
+		arg.ID,
 	)
 	return err
 }

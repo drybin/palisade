@@ -44,7 +44,7 @@ sql:
             go_type:
               type: "time.Time"
 
-          #flaot
+          #float
           - db_type: "double precision"
             nullable: true
             go_type:
@@ -53,6 +53,11 @@ sql:
           - db_type: "double precision"
             go_type:
               type: "float64"
+          - db_type: "pg_catalog.float8"
+            nullable: true
+            go_type:
+              type: "float64"
+              pointer: true
           - db_type: "pg_catalog.float8"
             go_type:
               type: "float64"

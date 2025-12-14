@@ -85,3 +85,63 @@ UPDATE coins
 SET support = $1, resistance = $2, rangeValue = $3, rangePercent = $4, avgPrice = $5, volatility = $6, maxDrawdown = $7, maxRise = $8
 WHERE symbol = $9;
 
+-- name: GetCoinsToProcess :many
+SELECT * FROM coins
+WHERE 
+    isSpotTradingAllowed = true
+    AND isPalisade = true
+    --AND volatility > 0.1
+    --AND volatility < 0.4
+    AND quoteasset = 'USDT'
+    AND symbol = 'TPTUUSDT'
+ORDER BY lastcheck DESC
+LIMIT $1
+OFFSET $2;
+
+-- name: SaveTradeLog :one
+INSERT INTO trade_log (
+   open_date,
+   open_balance,
+   symbol,
+   buy_price,
+   amount,
+   orderId,
+   upLevel,
+   downLevel
+   )
+   VALUES (
+           $1,
+           $2,
+           $3,
+           $4,
+           $5,
+           $6,
+           $7,
+           $8
+   )
+   RETURNING *;
+
+-- name: UpdateDealDateTradeLog :exec
+UPDATE trade_log
+SET deal_date = $1
+WHERE id = $2;
+
+-- name: UpdateCancelDateTradeLog :exec
+UPDATE trade_log
+SET cancel_date = $1
+WHERE id = $2;
+
+-- name: UpdateSuccesTradeLog :exec
+UPDATE trade_log
+SET close_date = $1, close_balance = $2, sell_price = $3
+WHERE id = $4;
+
+-- name: GetLastTradeId :one
+SELECT MAX(id) FROM trade_log;
+
+-- name: GetOpenOrders :many
+SELECT * FROM trade_log
+WHERE 
+    deal_date IS NULL
+    AND close_date IS NULL
+    AND cancel_date IS NULL;

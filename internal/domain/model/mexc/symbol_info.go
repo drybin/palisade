@@ -41,4 +41,13 @@ type SymbolDetail struct {
 	ContractAddress            string    `json:"contractAddress"`
 	St                         bool      `json:"st"`
 	LastCheck                  time.Time `json:"lastCheck"` // Дата последней проверки (date из таблицы coins)
+	IsPalisade                 bool      `json:"isPalisade"`
+	Support                    float64   `json:"support"`      // нижняя граница
+	Resistance                 float64   `json:"resistance"`   // верхняя граница
+	RangeValue                 float64   `json:"rangeValue"`   // диапазон между границами
+	RangePercent               float64   `json:"rangePercent"` // диапазон в процентах
+	AvgPrice                   float64   `json:"avgPrice"`     // средняя цена
+	Volatility                 float64   `json:"volatility"`   // волатильность в процентах
+	MaxDrawdown                float64   `json:"maxDrawdown"`  // максимальная просадка в процентах
+	MaxRise                    float64   `json:"maxRise"`      // максимальный рост в процентах
 }

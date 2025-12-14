@@ -26,6 +26,23 @@ CREATE TABLE logs (
    downLevel  DOUBLE PRECISION NOT NULL -- нижний уровень коридора
 );
 
+CREATE TABLE trade_log (
+   id   SERIAL PRIMARY KEY, -- id
+   open_date TIMESTAMPTZ      NOT NULL, --дата открытия ордера
+   deal_date TIMESTAMPTZ     , --дата принятия ордера
+   close_date TIMESTAMPTZ     , --дата закрытия ордера
+   cancel_date TIMESTAMPTZ    , --дата отмены ордера
+   open_balance  DOUBLE PRECISION NOT NULL, --баланс usdt на бирже при открытии ордера
+   close_balance  DOUBLE PRECISION, --баланс usdt на бирже при закрытии ордера
+   symbol  TEXT NOT NULL, -- монета c которой совершаем операцию
+   buy_price  DOUBLE PRECISION NOT NULL, -- цена покупки
+   sell_price  DOUBLE PRECISION, -- цена продажи
+   amount  DOUBLE PRECISION NOT NULL, -- объем монеты
+   orderId TEXT NOT NULL, -- состояние
+   upLevel  DOUBLE PRECISION NOT NULL, -- верхний уровень коридора
+   downLevel  DOUBLE PRECISION NOT NULL -- нижний уровень коридора
+);
+
 CREATE TABLE coins
 (
     id                         SERIAL PRIMARY KEY,        -- id
