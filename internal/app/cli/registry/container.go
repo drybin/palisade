@@ -68,7 +68,7 @@ func NewContainer(
 				service.NewByuService(mexcApi, mexcV2Api, stateRepo),
 				stateRepo,
 			),
-			PalisadeProcessSell:   usecase.NewPalisadeProcessSellUsecase(mexcApi, stateRepo),
+			PalisadeProcessSell:   usecase.NewPalisadeProcessSellUsecase(mexcApi, stateRepo, telegramApi),
 			GetCoinList:           usecase.NewGetCoinListUsecase(mexcApi, stateRepo),
 			CheckPalisadeCoinList: usecase.NewCheckPalisadeCoinListUsecase(mexcApi, stateRepo),
 			CheckPalisadeCoin:     usecase.NewCheckPalisadeCoinUsecase(mexcApi, stateRepo),
