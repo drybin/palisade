@@ -7,13 +7,19 @@ import (
 	"github.com/urfave/cli/v2"
 )
 
-func NewGetCoinListCommand(service usecase.IHelloWorld) *cli.Command {
+func NewGetCoinListCommand(service usecase.IGetCoinList) *cli.Command {
 	return &cli.Command{
 		Name:  "get_coin_list",
 		Usage: "get coin list command",
-		Flags: []cli.Flag{},
+		Flags: []cli.Flag{
+			&cli.BoolFlag{
+				Name:  "debug",
+				Usage: "enable debug output",
+			},
+		},
 		Action: func(c *cli.Context) error {
-			return service.Process(context.Background())
+			debug := c.Bool("debug")
+			return service.Process(context.Background(), debug)
 		},
 	}
 }

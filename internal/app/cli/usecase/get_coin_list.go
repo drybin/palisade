@@ -11,7 +11,7 @@ import (
 )
 
 type IGetCoinList interface {
-	Process(ctx context.Context) error
+	Process(ctx context.Context, debug bool) error
 }
 
 type GetCoinList struct {
@@ -29,7 +29,7 @@ func NewGetCoinListUsecase(
 	}
 }
 
-func (u *GetCoinList) Process(ctx context.Context) error {
+func (u *GetCoinList) Process(ctx context.Context, debug bool) error {
 	startTime := time.Now()
 	fmt.Printf("Get all coin list and save to db\n")
 	fmt.Printf("Время начала обработки: %s\n", startTime.Format("2006-01-02 15:04:05"))
@@ -43,7 +43,13 @@ func (u *GetCoinList) Process(ctx context.Context) error {
 	fmt.Printf("Found pairs count: %d\n", len(*res))
 
 	newCoinsCount := 0
+	totalCount := len(*res)
+	currentIndex := 0
 	for _, symbol := range *res {
+		currentIndex++
+		if debug {
+			fmt.Printf("[%d/%d] Обрабатываем монету: %s\n", currentIndex, totalCount, symbol.Symbol)
+		}
 		// fmt.Println("Check symbol: " + symbol.Symbol)
 
 		symbolFromDb, err := u.stateRepo.GetCoinInfo(ctx, symbol.Symbol)
