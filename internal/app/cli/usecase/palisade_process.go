@@ -177,5 +177,27 @@ func (u *PalisadeProcess) Process(ctx context.Context) error {
 		return wrap.Errorf("failed to save trade order: %w", err)
 	}
 
+	message := fmt.Sprintf(
+		"<b>📊 Новый ордер размещен</b>\n\n"+
+			"<b>Монета:</b> %s\n"+
+			"<b>Нижняя граница (Support):</b> %.8f\n"+
+			"<b>Верхняя граница (Resistance):</b> %.8f\n\n"+
+			"<b>Ордер:</b>\n"+
+			"  ID: %s\n"+
+			"  Цена: %.8f\n"+
+			"  Количество: %.8f\n"+
+			"  Сумма: %.2f USDT",
+		coin.Symbol,
+		coin.Support,
+		coin.Resistance,
+		placeOrderResult.OrderID,
+		coin.Support,
+		quantity,
+		coin.Support*quantity,
+	)
+	_, err = u.telegramApi.Send(message)
+	if err != nil {
+		fmt.Printf("⚠️  Ошибка при отправке сообщения в Telegram: %v\n", err)
+	}
 	return nil
 }
