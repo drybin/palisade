@@ -177,6 +177,7 @@ func (u *PalisadeProcess) Process(ctx context.Context) error {
 		return wrap.Errorf("failed to save trade order: %w", err)
 	}
 
+	totalBalance := usdtBalance.Free + usdtBalance.Locked
 	message := fmt.Sprintf(
 		"<b>📊 Новый ордер размещен</b>\n\n"+
 			"<b>Монета:</b> %s\n"+
@@ -186,7 +187,10 @@ func (u *PalisadeProcess) Process(ctx context.Context) error {
 			"  ID: %s\n"+
 			"  Цена: %.8f\n"+
 			"  Количество: %.8f\n"+
-			"  Сумма: %.2f USDT",
+			"  Сумма: %.2f USDT\n\n"+
+			"<b>Баланс на бирже:</b> %.2f USDT\n"+
+			"  Свободно: %.2f USDT\n"+
+			"  Заблокировано: %.2f USDT",
 		coin.Symbol,
 		coin.Support,
 		coin.Resistance,
@@ -194,6 +198,9 @@ func (u *PalisadeProcess) Process(ctx context.Context) error {
 		coin.Support,
 		quantity,
 		coin.Support*quantity,
+		totalBalance,
+		usdtBalance.Free,
+		usdtBalance.Locked,
 	)
 	_, err = u.telegramApi.Send(message)
 	if err != nil {
