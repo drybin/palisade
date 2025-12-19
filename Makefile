@@ -42,6 +42,6 @@ gensqlc:
 .PHONY: build
 build:
 	$(call _info,"Build with docker...")
-	docker run --init -it --rm --env-file .env -v ${PWD}:/app -w /app  golang:1.22 go build -o minter /app/cmd/cli/main.go
+	docker run --init -it --rm --env-file .env -v ${PWD}:/app -w /app  golang:1.25 go build -o palisade /app/cmd/cli/main.go
 
 ################################################################################################################

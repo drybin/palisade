@@ -11,7 +11,7 @@ import (
 	cliV2 "github.com/urfave/cli/v2"
 )
 
-const cliAppDesc = "cli tool for fead-and-greed"
+const cliAppDesc = "cli tool for palisade"
 
 // example call go run --race ./cmd/cli/... hello-world
 func Run(config *config.Config) error {

@@ -68,7 +68,7 @@ func (c MexcConfig) Validate() error {
 
 func InitConfig() (*Config, error) {
 	config := Config{
-		ServiceName: env.GetString("APP_NAME", "fead-and-greed"),
+		ServiceName: env.GetString("APP_NAME", "palisade"),
 		TgConfig:    initTgConfig(),
 		MexcConfig:  initMexcConfig(),
 		PostgreeDsn: env.GetString("POSTGREE_DSN", ""),
