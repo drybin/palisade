@@ -8,4 +8,4 @@ services:
     volumes:
       - ./data/postgree:/var/lib/postgresql/data
     ports:
-      - 5432:5432
+      - 5462:5432
