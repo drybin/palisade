@@ -46,6 +46,10 @@ func NewContainer(
 	mexcApi := repo.NewMexcWebapi(httpClient, mexcSpot, config.MexcConfig)
 	mexcV2Api := repo.NewMexcV2Webapi(httpClient, config.MexcConfig)
 
+	// Создаем отдельный HTTP клиент для Telegram API
+	telegramHttpClient := resty.New()
+	telegramApi := repo.NewTelegramWebapi(telegramHttpClient, config.TgConfig.BotToken, config.TgConfig.ChatId)
+
 	db, err := newDbConn(config)
 	if err != nil {
 		return nil, wrap.Errorf("failed to connect to Postgree: %w", err)
@@ -58,6 +62,7 @@ func NewContainer(
 			PalisadeProcess: usecase.NewPalisadeProcessUsecase(
 				mexcApi,
 				mexcV2Api,
+				telegramApi,
 				service.NewTradingPair(),
 				service.NewPalisadeLevels(mexcApi, mexcV2Api),
 				service.NewByuService(mexcApi, mexcV2Api, stateRepo),

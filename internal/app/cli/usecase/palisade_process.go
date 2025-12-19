@@ -21,6 +21,7 @@ type IPalisadeProcess interface {
 type PalisadeProcess struct {
 	repo                  *webapi.MexcWebapi
 	repoV2                *webapi.MexcV2Webapi
+	telegramApi           *webapi.TelegramWebapi
 	traidingPairsService  *service.TradingPair
 	palisadeLevelsService *service.PalisadeLevels
 	buyService            *service.ByuService
@@ -30,6 +31,7 @@ type PalisadeProcess struct {
 func NewPalisadeProcessUsecase(
 	repo *webapi.MexcWebapi,
 	repoV2 *webapi.MexcV2Webapi,
+	telegramApi *webapi.TelegramWebapi,
 	traidingPairsService *service.TradingPair,
 	palisadeLevelsService *service.PalisadeLevels,
 	buyService *service.ByuService,
@@ -38,6 +40,7 @@ func NewPalisadeProcessUsecase(
 	return &PalisadeProcess{
 		repo:                  repo,
 		repoV2:                repoV2,
+		telegramApi:           telegramApi,
 		traidingPairsService:  traidingPairsService,
 		palisadeLevelsService: palisadeLevelsService,
 		buyService:            buyService,

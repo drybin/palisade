@@ -30,7 +30,9 @@ func NewGetCoinListUsecase(
 }
 
 func (u *GetCoinList) Process(ctx context.Context) error {
-	fmt.Println("Get all coin list and save to db")
+	startTime := time.Now()
+	fmt.Printf("Get all coin list and save to db\n")
+	fmt.Printf("Время начала обработки: %s\n", startTime.Format("2006-01-02 15:04:05"))
 
 	res, err := u.repo.GetAllTickerPrices(ctx)
 	if err != nil {
@@ -40,6 +42,7 @@ func (u *GetCoinList) Process(ctx context.Context) error {
 
 	fmt.Printf("Found pairs count: %d\n", len(*res))
 
+	newCoinsCount := 0
 	for _, symbol := range *res {
 		// fmt.Println("Check symbol: " + symbol.Symbol)
 
@@ -62,10 +65,16 @@ func (u *GetCoinList) Process(ctx context.Context) error {
 			return wrap.Errorf("failed to save coin: %w", err)
 		}
 
+		newCoinsCount++
 		// fmt.Println("ok")
 		time.Sleep(2 * time.Second)
 	}
 
+	elapsed := time.Since(startTime)
 	fmt.Println("All done")
+	fmt.Printf("Время начала обработки: %s\n", startTime.Format("2006-01-02 15:04:05"))
+	fmt.Printf("Время окончания обработки: %s\n", time.Now().Format("2006-01-02 15:04:05"))
+	fmt.Printf("Общее время обработки: %v\n", elapsed)
+	fmt.Printf("Количество новых найденных монет: %d\n", newCoinsCount)
 	return nil
 }
