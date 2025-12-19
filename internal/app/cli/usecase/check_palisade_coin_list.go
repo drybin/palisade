@@ -15,7 +15,7 @@ import (
 )
 
 type ICheckPalisadeCoinList interface {
-	Process(ctx context.Context) error
+	Process(ctx context.Context, debug bool) error
 }
 
 type CheckPalisadeCoinList struct {
@@ -33,8 +33,10 @@ func NewCheckPalisadeCoinListUsecase(
 	}
 }
 
-func (u *CheckPalisadeCoinList) Process(ctx context.Context) error {
+func (u *CheckPalisadeCoinList) Process(ctx context.Context, debug bool) error {
+	startTime := time.Now()
 	fmt.Println("check palisade")
+	fmt.Printf("Время начала обработки: %s\n", startTime.Format("2006-01-02 15:04:05"))
 	spotTradingAllowed := true
 	isPalisade := true
 	data, err := u.stateRepo.GetCoins(
@@ -50,7 +52,13 @@ func (u *CheckPalisadeCoinList) Process(ctx context.Context) error {
 		return wrap.Errorf("failed get coins to check: %w", err)
 	}
 
+	totalCount := len(data)
+	currentIndex := 0
 	for _, coin := range data {
+		currentIndex++
+		if debug {
+			fmt.Printf("[%d/%d] Обрабатываем монету: %s\n", currentIndex, totalCount, coin.Symbol)
+		}
 		// проверяем последнюю дату проверки
 		lastCheck := coin.LastCheck
 		if time.Since(lastCheck) < 180*time.Minute {
@@ -89,21 +97,21 @@ func (u *CheckPalisadeCoinList) Process(ctx context.Context) error {
 		maxVolatilityPercent := 5.0
 		flatAnalysis := filteredKlines.AnalyzeFlat(maxVolatilityPercent)
 
-		// Выводим результаты анализа
-		fmt.Printf("\n=== Анализ для %s ===\n", coin.Symbol)
-		fmt.Printf("Количество свечей (всего/за последние 4 часа): %d/%d\n", len(*klines), len(filteredKlines))
-		fmt.Printf("Во флете: %v\n", flatAnalysis.IsFlat)
-		fmt.Printf("Нижняя граница (Support): %.8f\n", flatAnalysis.Support)
-		fmt.Printf("Верхняя граница (Resistance): %.8f\n", flatAnalysis.Resistance)
-		fmt.Printf("Диапазон: %.8f\n", flatAnalysis.Range)
-		fmt.Printf("Диапазон в процентах: %.2f%%\n", flatAnalysis.RangePercent)
-		fmt.Printf("Средняя цена: %.8f\n", flatAnalysis.AvgPrice)
-		fmt.Printf("Волатильность: %.2f%%\n", flatAnalysis.Volatility)
-		fmt.Printf("Максимальная просадка: %.2f%%\n", flatAnalysis.MaxDrawdown)
-		fmt.Printf("Максимальный рост: %.2f%%\n", flatAnalysis.MaxRise)
-		fmt.Printf("================================\n\n")
-
-		fmt.Println(coin.Symbol)
+		// Выводим результаты анализа только при флаге debug
+		if debug {
+			fmt.Printf("\n=== Анализ для %s ===\n", coin.Symbol)
+			fmt.Printf("Количество свечей (всего/за последние 4 часа): %d/%d\n", len(*klines), len(filteredKlines))
+			fmt.Printf("Во флете: %v\n", flatAnalysis.IsFlat)
+			fmt.Printf("Нижняя граница (Support): %.8f\n", flatAnalysis.Support)
+			fmt.Printf("Верхняя граница (Resistance): %.8f\n", flatAnalysis.Resistance)
+			fmt.Printf("Диапазон: %.8f\n", flatAnalysis.Range)
+			fmt.Printf("Диапазон в процентах: %.2f%%\n", flatAnalysis.RangePercent)
+			fmt.Printf("Средняя цена: %.8f\n", flatAnalysis.AvgPrice)
+			fmt.Printf("Волатильность: %.2f%%\n", flatAnalysis.Volatility)
+			fmt.Printf("Максимальная просадка: %.2f%%\n", flatAnalysis.MaxDrawdown)
+			fmt.Printf("Максимальный рост: %.2f%%\n", flatAnalysis.MaxRise)
+			fmt.Printf("================================\n\n")
+		}
 		// Обновляем статус isPalisade в базе данных
 		err = u.stateRepo.UpdateIsPalisade(ctx, coin.Symbol, flatAnalysis.IsFlat)
 		if err != nil {
@@ -119,6 +127,10 @@ func (u *CheckPalisadeCoinList) Process(ctx context.Context) error {
 		time.Sleep(3 * time.Second)
 	}
 
+	elapsed := time.Since(startTime)
+	fmt.Printf("Время начала обработки: %s\n", startTime.Format("2006-01-02 15:04:05"))
+	fmt.Printf("Время окончания обработки: %s\n", time.Now().Format("2006-01-02 15:04:05"))
+	fmt.Printf("Общее время обработки: %v\n", elapsed)
 	return nil
 }
 

@@ -11,9 +11,15 @@ func NewCheckPalisadeCoinListCommand(service usecase.ICheckPalisadeCoinList) *cl
 	return &cli.Command{
 		Name:  "check_palisade_coin_list",
 		Usage: "check palisade coin list command",
-		Flags: []cli.Flag{},
+		Flags: []cli.Flag{
+			&cli.BoolFlag{
+				Name:  "debug",
+				Usage: "enable debug output",
+			},
+		},
 		Action: func(c *cli.Context) error {
-			return service.Process(context.Background())
+			debug := c.Bool("debug")
+			return service.Process(context.Background(), debug)
 		},
 	}
 }
