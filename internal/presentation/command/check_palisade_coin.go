@@ -18,10 +18,18 @@ func NewCheckPalisadeCoinCommand(service usecase.ICheckPalisadeCoin) *cli.Comman
 				Usage:    "Symbol of the coin to check (e.g., BTCUSDT)",
 				Required: true,
 			},
+			&cli.Float64Flag{
+				Name:     "percentile",
+				Aliases:  []string{"p"},
+				Usage:    "Percentile for filtering klines (1-100, e.g., 95 to remove top and bottom 5%)",
+				Required: false,
+				Value:    0.0,
+			},
 		},
 		Action: func(c *cli.Context) error {
 			symbol := c.String("symbol")
-			return service.Process(context.Background(), symbol)
+			percentile := c.Float64("percentile")
+			return service.Process(context.Background(), symbol, percentile)
 		},
 	}
 }

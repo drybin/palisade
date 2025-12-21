@@ -3,6 +3,7 @@ package mexc
 import (
 	"encoding/json"
 	"math"
+	"sort"
 	"strconv"
 
 	"github.com/drybin/palisade/pkg/wrap"
@@ -171,4 +172,52 @@ func ParseKlinesFromJSON(data []byte) (Klines, error) {
 	}
 
 	return ParseKlinesFromArray(klinesArray)
+}
+
+// FilterByPercentile фильтрует свечи, убирая верхние и нижние значения выше указанного перцентиля
+// percentile должен быть в диапазоне от 1 до 100 (например, 95 означает убрать верхние и нижние 5%)
+func (k Klines) FilterByPercentile(percentile float64) Klines {
+	if len(k) == 0 || percentile < 1 || percentile > 100 {
+		return k
+	}
+
+	// Преобразуем из диапазона 1-100 в диапазон 0-1
+	percentileNormalized := percentile / 100.0
+
+	// Собираем все High и Low значения
+	highs := make([]float64, len(k))
+	lows := make([]float64, len(k))
+	for i, kline := range k {
+		highs[i] = kline.High
+		lows[i] = kline.Low
+	}
+
+	// Сортируем для нахождения перцентилей
+	sort.Float64s(highs)
+	sort.Float64s(lows)
+
+	// Вычисляем индексы для перцентилей
+	highIndex := int(math.Ceil(float64(len(highs)) * percentileNormalized))
+	lowIndex := int(math.Floor(float64(len(lows)) * (1 - percentileNormalized)))
+
+	if highIndex >= len(highs) {
+		highIndex = len(highs) - 1
+	}
+	if lowIndex < 0 {
+		lowIndex = 0
+	}
+
+	// Получаем граничные значения
+	highThreshold := highs[highIndex]
+	lowThreshold := lows[lowIndex]
+
+	// Фильтруем свечи: оставляем только те, у которых High <= highThreshold и Low >= lowThreshold
+	filtered := make(Klines, 0)
+	for _, kline := range k {
+		if kline.High <= highThreshold && kline.Low >= lowThreshold {
+			filtered = append(filtered, kline)
+		}
+	}
+
+	return filtered
 }
