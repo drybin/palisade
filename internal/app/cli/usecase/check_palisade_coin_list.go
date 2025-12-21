@@ -65,7 +65,6 @@ func (u *CheckPalisadeCoinList) Process(ctx context.Context, debug bool) error {
 			continue
 		}
 
-		fmt.Println(lastCheck)
 		klines, err := u.repo.GetKlines(
 			model.PairWithLevels{
 				Pair: model.Pair{
@@ -89,7 +88,9 @@ func (u *CheckPalisadeCoinList) Process(ctx context.Context, debug bool) error {
 		// Фильтруем свечи за последние 4 часа
 		filteredKlines := filterKlinesLast4Hours(*klines)
 		if len(filteredKlines) == 0 {
-			fmt.Printf("Нет свечей за последние 4 часа для %s, пропускаем\n", coin.Symbol)
+			if debug {
+				fmt.Printf("Нет свечей за последние 4 часа для %s, пропускаем\n", coin.Symbol)
+			}
 			continue
 		}
 
