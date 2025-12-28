@@ -54,6 +54,7 @@ func (u *CheckPalisadeCoinList) Process(ctx context.Context, debug bool) error {
 
 	totalCount := len(data)
 	currentIndex := 0
+	totalProcessed := 0
 	for _, coin := range data {
 		currentIndex++
 		if debug {
@@ -82,7 +83,8 @@ func (u *CheckPalisadeCoinList) Process(ctx context.Context, debug bool) error {
 				continue
 			}
 
-			return wrap.Errorf("failed to get klines: %w", err)
+			continue
+			// return wrap.Errorf("failed to get klines: %w", err)
 		}
 
 		// Фильтруем свечи за последние 4 часа
@@ -125,6 +127,7 @@ func (u *CheckPalisadeCoinList) Process(ctx context.Context, debug bool) error {
 				return wrap.Errorf("failed to update palisade params for coin %s: %w", coin.Symbol, err)
 			}
 		}
+		totalProcessed++
 		time.Sleep(3 * time.Second)
 	}
 
@@ -132,6 +135,7 @@ func (u *CheckPalisadeCoinList) Process(ctx context.Context, debug bool) error {
 	fmt.Printf("Время начала обработки: %s\n", startTime.Format("2006-01-02 15:04:05"))
 	fmt.Printf("Время окончания обработки: %s\n", time.Now().Format("2006-01-02 15:04:05"))
 	fmt.Printf("Общее время обработки: %v\n", elapsed)
+	fmt.Printf("Обработано монет: %d из %d\n", totalProcessed, totalCount)
 	return nil
 }
 
