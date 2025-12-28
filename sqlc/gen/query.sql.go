@@ -266,10 +266,9 @@ func (q *Queries) GetLastTradeId(ctx context.Context) (interface{}, error) {
 }
 
 const getOpenOrders = `-- name: GetOpenOrders :many
-SELECT id, open_date, deal_date, close_date, cancel_date, open_balance, close_balance, symbol, buy_price, sell_price, amount, orderid, uplevel, downlevel FROM trade_log
+SELECT id, open_date, deal_date, close_date, cancel_date, open_balance, close_balance, symbol, buy_price, sell_price, amount, orderid, orderid_sell, uplevel, downlevel FROM trade_log
 WHERE 
-    deal_date IS NULL
-    AND close_date IS NULL
+    close_date IS NULL
     AND cancel_date IS NULL
 `
 
@@ -295,6 +294,7 @@ func (q *Queries) GetOpenOrders(ctx context.Context) ([]TradeLog, error) {
 			&i.SellPrice,
 			&i.Amount,
 			&i.Orderid,
+			&i.OrderidSell,
 			&i.Uplevel,
 			&i.Downlevel,
 		); err != nil {
@@ -480,7 +480,7 @@ INSERT INTO trade_log (
            $7,
            $8
    )
-   RETURNING id, open_date, deal_date, close_date, cancel_date, open_balance, close_balance, symbol, buy_price, sell_price, amount, orderid, uplevel, downlevel
+   RETURNING id, open_date, deal_date, close_date, cancel_date, open_balance, close_balance, symbol, buy_price, sell_price, amount, orderid, orderid_sell, uplevel, downlevel
 `
 
 type SaveTradeLogParams struct {
@@ -519,6 +519,7 @@ func (q *Queries) SaveTradeLog(ctx context.Context, arg SaveTradeLogParams) (Tra
 		&i.SellPrice,
 		&i.Amount,
 		&i.Orderid,
+		&i.OrderidSell,
 		&i.Uplevel,
 		&i.Downlevel,
 	)
@@ -604,6 +605,22 @@ func (q *Queries) UpdatePalisadeParams(ctx context.Context, arg UpdatePalisadePa
 		arg.Maxrise,
 		arg.Symbol,
 	)
+	return err
+}
+
+const updateSellOrderIdTradeLog = `-- name: UpdateSellOrderIdTradeLog :exec
+UPDATE trade_log
+SET orderId_sell = $1
+WHERE id = $2
+`
+
+type UpdateSellOrderIdTradeLogParams struct {
+	OrderidSell *string
+	ID          int
+}
+
+func (q *Queries) UpdateSellOrderIdTradeLog(ctx context.Context, arg UpdateSellOrderIdTradeLogParams) error {
+	_, err := q.db.Exec(ctx, updateSellOrderIdTradeLog, arg.OrderidSell, arg.ID)
 	return err
 }
 

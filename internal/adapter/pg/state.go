@@ -342,6 +342,20 @@ func (u StateRepository) UpdateSuccesTradeLog(ctx context.Context, id int, close
 	return nil
 }
 
+func (u StateRepository) UpdateSellOrderIdTradeLog(ctx context.Context, id int, sellOrderId string) error {
+	db := palisade_database.New(u.Postgree)
+
+	err := db.UpdateSellOrderIdTradeLog(ctx, palisade_database.UpdateSellOrderIdTradeLogParams{
+		ID:          id,
+		OrderidSell: &sellOrderId,
+	})
+	if err != nil {
+		return wrap.Errorf("failed to update sell order id for trade log id %d: %w", id, err)
+	}
+
+	return nil
+}
+
 func (u StateRepository) GetOpenOrders(ctx context.Context) ([]repo.TradeLog, error) {
 	db := palisade_database.New(u.Postgree)
 
@@ -372,6 +386,11 @@ func mapTradeLogToDomainModel(t palisade_database.TradeLog) *repo.TradeLog {
 		sellPrice = *t.SellPrice
 	}
 
+	orderIdSell := ""
+	if t.OrderidSell != nil {
+		orderIdSell = *t.OrderidSell
+	}
+
 	return &repo.TradeLog{
 		ID:           t.ID,
 		OpenDate:     t.OpenDate,
@@ -385,6 +404,7 @@ func mapTradeLogToDomainModel(t palisade_database.TradeLog) *repo.TradeLog {
 		SellPrice:    sellPrice,
 		Amount:       t.Amount,
 		OrderId:      t.Orderid,
+		OrderId_sell: orderIdSell,
 		UpLevel:      t.Uplevel,
 		DownLevel:    t.Downlevel,
 	}

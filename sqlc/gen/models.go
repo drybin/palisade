@@ -86,6 +86,7 @@ type TradeLog struct {
 	SellPrice    *float64
 	Amount       float64
 	Orderid      string
+	OrderidSell  *string
 	Uplevel      float64
 	Downlevel    float64
 }

@@ -38,7 +38,8 @@ CREATE TABLE trade_log (
    buy_price  DOUBLE PRECISION NOT NULL, -- цена покупки
    sell_price  DOUBLE PRECISION, -- цена продажи
    amount  DOUBLE PRECISION NOT NULL, -- объем монеты
-   orderId TEXT NOT NULL, -- состояние
+   orderId TEXT NOT NULL, -- id ордера на бирже
+   orderId_sell TEXT,  -- id ордера на продажу на бирже
    upLevel  DOUBLE PRECISION NOT NULL, -- верхний уровень коридора
    downLevel  DOUBLE PRECISION NOT NULL -- нижний уровень коридора
 );

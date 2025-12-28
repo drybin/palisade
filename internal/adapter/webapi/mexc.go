@@ -3,8 +3,10 @@ package webapi
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"mexc-sdk/mexcsdk"
 	"strconv"
+	"strings"
 
 	"github.com/drybin/palisade/internal/app/cli/config"
 	"github.com/drybin/palisade/internal/domain/enum"
@@ -176,7 +178,28 @@ func (m *MexcWebapi) GetOrderQuery(
 		"orderId": orderId, // ID ордера
 	}
 
-	resp := m.spot.QueryOrder(&symbol, params)
+	// Используем recover для перехвата паники от SDK
+	var resp interface{}
+	var panicErr interface{}
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				panicErr = r
+			}
+		}()
+		resp = m.spot.QueryOrder(&symbol, params)
+	}()
+
+	// Если была паника, проверяем, является ли она ошибкой "Order does not exist"
+	if panicErr != nil {
+		panicStr := fmt.Sprintf("%v", panicErr)
+		if strings.Contains(panicStr, "Order does not exist") || strings.Contains(panicStr, "code\":-2013") {
+			// Ордер не существует, возвращаем nil без ошибки
+			return nil, nil
+		}
+		// Другая ошибка, пробрасываем панику дальше
+		panic(panicErr)
+	}
 
 	if resp == nil {
 		return nil, wrap.Errorf("failed to query order: response is nil")
@@ -185,6 +208,18 @@ func (m *MexcWebapi) GetOrderQuery(
 	bytes, err := json.Marshal(resp)
 	if err != nil {
 		return nil, wrap.Errorf("failed to marshal query order response: %w", err)
+	}
+
+	// Проверяем, является ли ответ ошибкой "Order does not exist"
+	var errorResp struct {
+		Code int    `json:"code"`
+		Msg  string `json:"msg"`
+	}
+	if err := json.Unmarshal(bytes, &errorResp); err == nil {
+		if errorResp.Code == -2013 || (errorResp.Msg != "" && (errorResp.Msg == "Order does not exist." || errorResp.Msg == "Order does not exist")) {
+			// Ордер не существует, возвращаем nil без ошибки
+			return nil, nil
+		}
 	}
 
 	result, err := mexc.ParseQueryOrderFromJSON(bytes)

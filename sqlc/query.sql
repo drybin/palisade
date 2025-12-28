@@ -131,6 +131,11 @@ UPDATE trade_log
 SET cancel_date = $1
 WHERE id = $2;
 
+-- name: UpdateSellOrderIdTradeLog :exec
+UPDATE trade_log
+SET orderId_sell = $1
+WHERE id = $2;
+
 -- name: UpdateSuccesTradeLog :exec
 UPDATE trade_log
 SET close_date = $1, close_balance = $2, sell_price = $3
@@ -142,6 +147,5 @@ SELECT MAX(id) FROM trade_log;
 -- name: GetOpenOrders :many
 SELECT * FROM trade_log
 WHERE 
-    deal_date IS NULL
-    AND close_date IS NULL
+    close_date IS NULL
     AND cancel_date IS NULL;

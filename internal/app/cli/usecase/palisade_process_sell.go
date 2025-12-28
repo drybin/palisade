@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/drybin/palisade/internal/adapter/webapi"
+	"github.com/drybin/palisade/internal/domain/enum/order"
 	"github.com/drybin/palisade/internal/domain/helpers"
 	"github.com/drybin/palisade/internal/domain/model"
 	"github.com/drybin/palisade/internal/domain/repo"
@@ -67,14 +68,21 @@ func (u *PalisadeProcessSell) Process(ctx context.Context) error {
 	fmt.Printf("Дата открытия: %s\n", dbOrder.OpenDate.Format("2006-01-02 15:04:05"))
 
 	// Получаем открытые ордера с биржи для этого символа
-	exchangeOrders, err := u.repo.GetOpenOrders(ctx, model.OrderParams{
-		Symbol: dbOrder.Symbol,
-	})
-	if err != nil {
-		return wrap.Errorf("ошибка при получении ордеров с биржи для %s: %w", dbOrder.Symbol, err)
-	}
+	//exchangeOrders, err := u.repo.GetOpenOrders(ctx, model.OrderParams{
+	//	Symbol: dbOrder.Symbol,
+	//})
+	//if err != nil {
+	//	return wrap.Errorf("ошибка при получении ордеров с биржи для %s: %w", dbOrder.Symbol, err)
+	//}
 
-	if exchangeOrders == nil || len(*exchangeOrders) == 0 {
+	queryResult, err := u.repo.GetOrderQuery(dbOrders[0].Symbol, dbOrders[0].OrderId)
+	if err != nil {
+		return wrap.Errorf("ошибка при получении ордера с биржи для %s: %w", dbOrder.Symbol, err)
+	}
+	//fmt.Printf("%v\n", queryResult.Status)
+	//os.Exit(1)
+
+	if queryResult == nil {
 		fmt.Printf("⚠️  Статус: Ордер НЕ найден на бирже (возможно, уже исполнен или отменен)\n")
 		// Обновляем cancel_date в базе данных (в часовом поясе GMT+7)
 		cancelTime := helpers.NowGMT7()
@@ -104,213 +112,201 @@ func (u *PalisadeProcessSell) Process(ctx context.Context) error {
 			dbOrder.OpenDate.Format("2006-01-02 15:04:05"),
 			cancelTime.Format("2006-01-02 15:04:05 MST"),
 		)
-		_, _ = u.telegramApi.Send(message)
+		_, err = u.telegramApi.Send(message)
+		if err != nil {
+			fmt.Printf("⚠️  Не удалось отправить сообщение в Telegram: %v\n", err)
+		}
 		return nil
 	}
 
-	// Ищем наш ордер среди ордеров с биржи по OrderId
-	found := false
-	for _, exchangeOrder := range *exchangeOrders {
-		// Сравниваем OrderId (оба теперь строки)
-		if exchangeOrder.OrderID == dbOrder.OrderId {
-			found = true
-			fmt.Printf("✅ Статус: Ордер найден на бирже\n")
-			fmt.Printf("   Статус на бирже: %s\n", exchangeOrder.Status)
-			fmt.Printf("   Тип: %s\n", exchangeOrder.Type)
-			fmt.Printf("   Сторона: %s\n", exchangeOrder.Side)
-			fmt.Printf("   Цена: %s\n", exchangeOrder.Price)
-			fmt.Printf("   Исходное количество: %s\n", exchangeOrder.OrigQty)
-			fmt.Printf("   Исполнено: %s\n", exchangeOrder.ExecutedQty)
-			fmt.Printf("   Накопленная сумма: %s\n", exchangeOrder.CummulativeQuoteQty)
-			fmt.Printf("   Время создания: %d\n", exchangeOrder.Time)
-			fmt.Printf("   Время обновления: %d\n", exchangeOrder.UpdateTime)
-			if exchangeOrder.CancelReason != nil {
-				fmt.Printf("   Причина отмены: %s\n", *exchangeOrder.CancelReason)
+	//Обрабатываем ордер Sell
+	if queryResult.Side == order.SELL.String() {
+		msg := ""
+		// Получаем текущую цену пары
+		currentPrice, err := u.repo.GetAvgPrice(ctx, dbOrder.Symbol)
+		if err != nil {
+			fmt.Printf("   ⚠️  Не удалось получить текущую цену для %s: %v\n", dbOrder.Symbol, err)
+		}
+
+		// Время открытия ордера из базы данных
+		timeSinceOpen := time.Since(dbOrder.OpenDate)
+
+		//Если цена вышла из диапазона
+		if currentPrice.Price > dbOrder.UpLevel || currentPrice.Price < dbOrder.DownLevel || timeSinceOpen > 120*time.Minute {
+			if currentPrice.Price > dbOrder.UpLevel {
+				msg = fmt.Sprintf(
+					"Текущая цена вышла за диапазон вверх\nТекущая цена: %.8f\nВерхняя цена (UpLevel): %.8f",
+					currentPrice.Price,
+					dbOrder.UpLevel,
+				)
+			}
+			if currentPrice.Price < dbOrder.DownLevel {
+				msg = fmt.Sprintf(
+					"Текущая цена вышла за диапазон вниз\nТекущая цена: %.8f\nНижняя цена (DownLevel): %.8f",
+					currentPrice.Price,
+					dbOrder.DownLevel,
+				)
+			}
+			if timeSinceOpen > 120*time.Minute {
+				msg = fmt.Sprintf(
+					"Прошло больше 2х часов с момента открытия оредра \nТекущая цена: %.8f\nНижняя цена (DownLevel): %.8f",
+					currentPrice.Price,
+					dbOrder.DownLevel,
+				)
 			}
 
-			// Если статус NEW, проверяем время с момента открытия
-			if exchangeOrder.Status == "NEW" {
-				// Время открытия ордера из базы данных
-				timeSinceOpen := time.Since(dbOrder.OpenDate)
-				hours := timeSinceOpen.Hours()
-				minutes := timeSinceOpen.Minutes() - float64(int(hours))*60
-
-				fmt.Printf("   ⏱️  Время с момента открытия: %.0f часов %.0f минут\n", hours, minutes)
-
-				// Если прошло больше 2 часов, помечаем как отмененный
-				if timeSinceOpen > 2*time.Minute {
-					cancelResp, err := u.repo.CancelOrder(exchangeOrder.Symbol, exchangeOrder.OrderID)
-					if err != nil {
-						fmt.Printf("   ❌ Ошибка при отмене ордера: %v\n", err)
-					} else {
-						fmt.Printf("   📋 Результат отмены ордера:\n")
-						fmt.Printf("      Success: %v\n", cancelResp.Success)
-						fmt.Printf("      Code: %d\n", cancelResp.Code)
-						for _, result := range cancelResp.Data {
-							fmt.Printf("      OrderID: %s, ErrorCode: %d, ErrorMsg: %s\n", result.OrderID, result.ErrorCode, result.ErrorMsg)
-						}
-					}
-					fmt.Printf("   ⚠️  Прошло больше 2 часов, помечаем ордер как отмененный\n")
-					cancelTime := helpers.NowGMT7()
-					err = u.stateRepo.UpdateCancelDateTradeLog(ctx, dbOrder.ID, cancelTime)
-					if err != nil {
-						return wrap.Errorf("failed to update cancel date for trade log id %d: %w", dbOrder.ID, err)
-					}
-					fmt.Printf("   ✅ Обновлен cancel_date в базе данных\n")
-
-					// Отправляем сообщение в Telegram
-					timeSinceOpen := time.Since(dbOrder.OpenDate)
-					hours := int(timeSinceOpen.Hours())
-					minutes := int(timeSinceOpen.Minutes()) % 60
-					message := fmt.Sprintf(
-						"<b>⏱️ Ордер отменен по времени</b>\n\n"+
-							"<b>Параметры ордера:</b>\n"+
-							"  Символ: %s\n"+
-							"  OrderID: %s\n"+
-							"  Цена покупки: %.8f\n"+
-							"  Количество: %.8f\n"+
-							"  Дата открытия: %s\n\n"+
-							"<b>Время:</b> %s\n"+
-							"<b>Время с момента открытия:</b> %d часов %d минут\n"+
-							"<b>Причина:</b> Ордер находился в статусе NEW более 2 минут\n"+
-							"<b>Действие:</b> Ордер отменен и помечен как отмененный в базе данных",
-						dbOrder.Symbol,
-						exchangeOrder.OrderID,
-						dbOrder.BuyPrice,
-						dbOrder.Amount,
-						dbOrder.OpenDate.Format("2006-01-02 15:04:05"),
-						cancelTime.Format("2006-01-02 15:04:05 MST"),
-						hours,
-						minutes,
-					)
-					_, _ = u.telegramApi.Send(message)
-					return nil
-				}
+			nextOrderId, err := u.stateRepo.GetNextTradeId(ctx)
+			if err != nil {
+				return wrap.Errorf("failed to get next trade id: %w", err)
 			}
+			clientOrderId := fmt.Sprintf("Test_order_auto_sell_market_1_%d", nextOrderId)
 
-			queryResult, err := u.repo.GetOrderQuery(exchangeOrder.Symbol, exchangeOrder.OrderID)
+			placeOrderResult, err := u.repo.NewOrder(
+				model.OrderParams{
+					Symbol:           dbOrder.Symbol,
+					Side:             order.SELL,
+					OrderType:        order.MARKET,
+					Quantity:         dbOrder.Amount,
+					NewClientOrderId: clientOrderId,
+				},
+			)
 
 			if err != nil {
-				fmt.Printf("   ❌ Ошибка при запросе информации об ордере: %v\n", err)
-			} else {
-				fmt.Printf("   📋 Информация об ордере:\n")
-				fmt.Printf("      Статус: %s\n", queryResult.Status)
-				fmt.Printf("      Исполнено: %s / %s\n", queryResult.ExecutedQty, queryResult.OrigQty)
-
-				// Проверяем статус ордера
-				status := queryResult.Status
-				updateTime := helpers.NowGMT7()
-				switch status {
-				case "CANCELED", "REJECTED", "EXPIRED":
-					fmt.Printf("   ⚠️  Ордер в статусе %s, помечаем как отмененный в базе данных\n", status)
-					cancelTime := helpers.NowGMT7()
-					err = u.stateRepo.UpdateCancelDateTradeLog(ctx, dbOrder.ID, cancelTime)
-					if err != nil {
-						fmt.Printf("   ❌ Ошибка при обновлении cancel_date: %v\n", err)
-					} else {
-						fmt.Printf("   ✅ Обновлен cancel_date в базе данных\n")
-					}
-
-					// Отправляем сообщение в Telegram
-					reason := "Ордер отменен биржей"
-					// nolint:staticcheck
-					if status == "REJECTED" {
-						reason = "Ордер отклонен биржей"
-					} else if status == "EXPIRED" {
-						reason = "Ордер истек"
-					}
-					message := fmt.Sprintf(
-						"<b>❌ Ордер %s</b>\n\n"+
-							"<b>Параметры ордера:</b>\n"+
-							"  Символ: %s\n"+
-							"  OrderID: %s\n"+
-							"  Цена покупки: %.8f\n"+
-							"  Количество: %.8f\n"+
-							"  Дата открытия: %s\n\n"+
-							"<b>Время:</b> %s\n"+
-							"<b>Причина:</b> %s\n"+
-							"<b>Действие:</b> Ордер помечен как отмененный в базе данных",
-						status,
-						dbOrder.Symbol,
-						queryResult.OrderID,
-						dbOrder.BuyPrice,
-						dbOrder.Amount,
-						dbOrder.OpenDate.Format("2006-01-02 15:04:05"),
-						cancelTime.Format("2006-01-02 15:04:05 MST"),
-						reason,
-					)
-					_, _ = u.telegramApi.Send(message)
-				case "FILLED":
-					fmt.Printf("   ✅ Ордер полностью исполнен (FILLED)\n")
-
-					// Отправляем сообщение в Telegram
-					message := fmt.Sprintf(
-						"<b>✅ Ордер полностью исполнен</b>\n\n"+
-							"<b>Параметры ордера:</b>\n"+
-							"  Символ: %s\n"+
-							"  OrderID: %s\n"+
-							"  Цена покупки: %.8f\n"+
-							"  Количество: %.8f\n"+
-							"  Дата открытия: %s\n\n"+
-							"<b>Время:</b> %s\n"+
-							"<b>Причина:</b> Ордер полностью исполнен на бирже\n"+
-							"<b>Действие:</b> Ордер в статусе FILLED",
-						dbOrder.Symbol,
-						queryResult.OrderID,
-						dbOrder.BuyPrice,
-						dbOrder.Amount,
-						dbOrder.OpenDate.Format("2006-01-02 15:04:05"),
-						updateTime.Format("2006-01-02 15:04:05 MST"),
-					)
-					_, _ = u.telegramApi.Send(message)
-				case "PARTIALLY_CANCELED":
-					fmt.Printf("   ⚠️  Ордер частично отменен (PARTIALLY_CANCELED)\n")
-
-					// Отправляем сообщение в Telegram
-					message := fmt.Sprintf(
-						"<b>⚠️ Ордер частично отменен</b>\n\n"+
-							"<b>Параметры ордера:</b>\n"+
-							"  Символ: %s\n"+
-							"  OrderID: %s\n"+
-							"  Цена покупки: %.8f\n"+
-							"  Количество: %.8f\n"+
-							"  Дата открытия: %s\n\n"+
-							"<b>Время:</b> %s\n"+
-							"<b>Причина:</b> Ордер частично отменен на бирже\n"+
-							"<b>Действие:</b> Ордер в статусе PARTIALLY_CANCELED\n"+
-							"<b>Исполнено:</b> %s / %s",
-						dbOrder.Symbol,
-						queryResult.OrderID,
-						dbOrder.BuyPrice,
-						dbOrder.Amount,
-						dbOrder.OpenDate.Format("2006-01-02 15:04:05"),
-						updateTime.Format("2006-01-02 15:04:05 MST"),
-						queryResult.ExecutedQty,
-						queryResult.OrigQty,
-					)
-					_, _ = u.telegramApi.Send(message)
-				}
+				return wrap.Errorf("failed to place order: %w", err)
 			}
 
-			break
+			fmt.Printf("\n✅ Маркет-ордер на продажу размещен\n")
+			fmt.Printf("OrderID: %s\n", placeOrderResult.OrderID)
+			fmt.Printf("Symbol: %s\n", placeOrderResult.Symbol)
+			fmt.Printf("Причина: %s\n", msg)
+
+			// Отправляем сообщение в Telegram
+			marketOrderTime := helpers.NowGMT7()
+			telegramMessage := fmt.Sprintf(
+				"<b>🚨 Маркет-ордер на продажу размещен</b>\n\n"+
+					"<b>Параметры ордера на покупку:</b>\n"+
+					"  Символ: %s\n"+
+					"  OrderID покупки: %s\n"+
+					"  Цена покупки: %.8f\n"+
+					"  Количество: %.8f\n"+
+					"  Дата открытия: %s\n\n"+
+					"<b>Маркет-ордер на продажу:</b>\n"+
+					"  OrderID продажи: %s\n"+
+					"  Количество: %.8f\n"+
+					"  Текущая цена: %.8f\n\n"+
+					"<b>Время:</b> %s\n"+
+					"<b>Причина:</b>\n%s",
+				dbOrder.Symbol,
+				dbOrder.OrderId,
+				dbOrder.BuyPrice,
+				dbOrder.Amount,
+				dbOrder.OpenDate.Format("2006-01-02 15:04:05"),
+				placeOrderResult.OrderID,
+				dbOrder.Amount,
+				currentPrice.Price,
+				marketOrderTime.Format("2006-01-02 15:04:05 MST"),
+				msg,
+			)
+			_, err = u.telegramApi.Send(telegramMessage)
+			if err != nil {
+				fmt.Printf("⚠️  Не удалось отправить сообщение в Telegram: %v\n", err)
+			}
+
+		}
+		fmt.Printf("\n--- Текущая цена %s ---\n", dbOrder.Symbol)
+		fmt.Printf("Цена: %.8f\n", currentPrice.Price)
+		fmt.Printf("Период усреднения: %d минут\n", currentPrice.Mins)
+		if msg != "" {
+			fmt.Printf("⚠️  %s\n", msg)
 		}
 	}
 
-	if !found {
-		fmt.Printf("⚠️  Статус: Ордер с OrderId %s не найден среди открытых ордеров на бирже\n", dbOrder.OrderId)
-		fmt.Printf("   Всего открытых ордеров на бирже для %s: %d\n", dbOrder.Symbol, len(*exchangeOrders))
-		// Обновляем cancel_date в базе данных (в часовом поясе GMT+7)
+	switch queryResult.Status {
+	case "NEW":
+
+		// Время открытия ордера из базы данных
+		timeSinceOpen := time.Since(dbOrder.OpenDate)
+		hours := timeSinceOpen.Hours()
+		minutes := timeSinceOpen.Minutes() - float64(int(hours))*60
+
+		fmt.Printf("   ⏱️  Время с момента открытия: %.0f часов %.0f минут\n", hours, minutes)
+
+		// Если прошло больше 2 часов, помечаем как отмененный
+		if timeSinceOpen > 120*time.Minute {
+			cancelResp, err := u.repo.CancelOrder(dbOrder.Symbol, dbOrder.OrderId)
+			if err != nil {
+				fmt.Printf("   ❌ Ошибка при отмене ордера: %v\n", err)
+			} else {
+				fmt.Printf("   📋 Результат отмены ордера:\n")
+				fmt.Printf("      Success: %v\n", cancelResp.Success)
+				fmt.Printf("      Code: %d\n", cancelResp.Code)
+				for _, result := range cancelResp.Data {
+					fmt.Printf("      OrderID: %s, ErrorCode: %d, ErrorMsg: %s\n", result.OrderID, result.ErrorCode, result.ErrorMsg)
+				}
+			}
+			fmt.Printf("   ⚠️  Прошло больше 2 часов, помечаем ордер как отмененный\n")
+			cancelTime := helpers.NowGMT7()
+			err = u.stateRepo.UpdateCancelDateTradeLog(ctx, dbOrder.ID, cancelTime)
+			if err != nil {
+				return wrap.Errorf("failed to update cancel date for trade log id %d: %w", dbOrder.ID, err)
+			}
+			fmt.Printf("   ✅ Обновлен cancel_date в базе данных\n")
+
+			// Отправляем сообщение в Telegram
+			timeSinceOpen := time.Since(dbOrder.OpenDate)
+			hours := int(timeSinceOpen.Hours())
+			minutes := int(timeSinceOpen.Minutes()) % 60
+			message := fmt.Sprintf(
+				"<b>⏱️ Ордер отменен по времени</b>\n\n"+
+					"<b>Параметры ордера:</b>\n"+
+					"  Символ: %s\n"+
+					"  OrderID: %s\n"+
+					"  Тип ордера: %s\n"+
+					"  Цена покупки: %.8f\n"+
+					"  Количество: %.8f\n"+
+					"  Дата открытия: %s\n\n"+
+					"<b>Время:</b> %s\n"+
+					"<b>Время с момента открытия:</b> %d часов %d минут\n"+
+					"<b>Причина:</b> Ордер находился в статусе NEW более 2 минут\n"+
+					"<b>Действие:</b> Ордер отменен и помечен как отмененный в базе данных",
+				dbOrder.Symbol,
+				dbOrder.OrderId,
+				queryResult.Side,
+				dbOrder.BuyPrice,
+				dbOrder.Amount,
+				dbOrder.OpenDate.Format("2006-01-02 15:04:05"),
+				cancelTime.Format("2006-01-02 15:04:05 MST"),
+				hours,
+				minutes,
+			)
+			_, err = u.telegramApi.Send(message)
+			if err != nil {
+				fmt.Printf("⚠️  Не удалось отправить сообщение в Telegram: %v\n", err)
+			}
+
+		}
+		return nil
+
+	case "CANCELED", "REJECTED", "EXPIRED":
+		fmt.Printf("   ⚠️  Ордер в статусе %s, помечаем как отмененный в базе данных\n", queryResult.Status)
 		cancelTime := helpers.NowGMT7()
-		fmt.Printf("   Сохраняем cancel_date: %s (часовой пояс: %s)\n", cancelTime.Format("2006-01-02 15:04:05 MST"), cancelTime.Location().String())
 		err = u.stateRepo.UpdateCancelDateTradeLog(ctx, dbOrder.ID, cancelTime)
 		if err != nil {
-			return wrap.Errorf("failed to update cancel date for trade log id %d: %w", dbOrder.ID, err)
+			fmt.Printf("   ❌ Ошибка при обновлении cancel_date: %v\n", err)
+		} else {
+			fmt.Printf("   ✅ Обновлен cancel_date в базе данных\n")
 		}
-		fmt.Printf("✅ Обновлен cancel_date в базе данных\n")
 
 		// Отправляем сообщение в Telegram
+		reason := "Ордер отменен биржей"
+		// nolint:staticcheck
+		if queryResult.Status == "REJECTED" {
+			reason = "Ордер отклонен биржей"
+		} else if queryResult.Status == "EXPIRED" {
+			reason = "Ордер истек"
+		}
 		message := fmt.Sprintf(
-			"<b>⚠️ Ордер не найден среди открытых</b>\n\n"+
+			"<b>❌ Ордер %s</b>\n\n"+
 				"<b>Параметры ордера:</b>\n"+
 				"  Символ: %s\n"+
 				"  OrderID: %s\n"+
@@ -318,17 +314,178 @@ func (u *PalisadeProcessSell) Process(ctx context.Context) error {
 				"  Количество: %.8f\n"+
 				"  Дата открытия: %s\n\n"+
 				"<b>Время:</b> %s\n"+
-				"<b>Причина:</b> Ордер с указанным OrderID не найден среди открытых ордеров на бирже (всего открытых: %d)\n"+
+				"<b>Причина:</b> %s\n"+
+				"<b>Действие:</b> Ордер помечен как отмененный в базе данных",
+			queryResult.Status,
+			dbOrder.Symbol,
+			queryResult.OrderID,
+			dbOrder.BuyPrice,
+			dbOrder.Amount,
+			dbOrder.OpenDate.Format("2006-01-02 15:04:05"),
+			cancelTime.Format("2006-01-02 15:04:05 MST"),
+			reason,
+		)
+		_, err = u.telegramApi.Send(message)
+		if err != nil {
+			fmt.Printf("⚠️  Не удалось отправить сообщение в Telegram: %v\n", err)
+		}
+	case "FILLED":
+		fmt.Printf("   ✅ Ордер полностью исполнен (FILLED)\n")
+		updateTime := helpers.NowGMT7()
+
+		//Отправляем сообщение в Telegram
+		message := fmt.Sprintf(
+			"<b>✅ Ордер полностью исполнен</b>\n\n"+
+				"<b>Параметры ордера:</b>\n"+
+				"  Символ: %s\n"+
+				"  OrderID: %s\n"+
+				"  Цена покупки: %.8f\n"+
+				"  Количество: %.8f\n"+
+				"  Дата открытия: %s\n\n"+
+				"<b>Время:</b> %s\n"+
+				"<b>Причина:</b> Ордер полностью исполнен на бирже\n"+
+				"<b>Действие:</b> Ордер в статусе FILLED",
+			dbOrder.Symbol,
+			queryResult.OrderID,
+			dbOrder.BuyPrice,
+			dbOrder.Amount,
+			dbOrder.OpenDate.Format("2006-01-02 15:04:05"),
+			updateTime.Format("2006-01-02 15:04:05 MST"),
+		)
+		_, err = u.telegramApi.Send(message)
+		if err != nil {
+			fmt.Printf("⚠️  Не удалось отправить сообщение в Telegram: %v\n", err)
+		}
+
+		fmt.Printf("\n--- Размещаем ордер на продажу%s ---\n", dbOrder.Symbol)
+		fmt.Printf("Цена: %.8f\n", dbOrder.UpLevel)
+		fmt.Printf("Количество: %.8f\n", dbOrder.Amount)
+
+		nextOrderId, err := u.stateRepo.GetNextTradeId(ctx)
+		if err != nil {
+			return wrap.Errorf("failed to get next trade id: %w", err)
+		}
+		clientOrderId := fmt.Sprintf("Test_order_auto_sell_3_%d", nextOrderId)
+
+		placeOrderResult, err := u.repo.NewOrder(
+			model.OrderParams{
+				Symbol:           dbOrder.Symbol,
+				Side:             order.SELL,
+				OrderType:        order.LIMIT,
+				Quantity:         dbOrder.Amount,
+				QuoteOrderQty:    dbOrder.Amount,
+				Price:            dbOrder.UpLevel,
+				NewClientOrderId: clientOrderId,
+			},
+		)
+
+		if err != nil {
+			return wrap.Errorf("failed to place order: %w", err)
+		}
+
+		fmt.Printf("\nордер размещен id %s\n", placeOrderResult.OrderID)
+
+		err = u.stateRepo.UpdateSellOrderIdTradeLog(ctx, dbOrder.ID, placeOrderResult.OrderID)
+		if err != nil {
+			return wrap.Errorf("failed to save sell order id: %w", err)
+		}
+
+		dealTime := helpers.NowGMT7()
+		err = u.stateRepo.UpdateDealDateTradeLog(ctx, dbOrder.ID, dealTime)
+		if err != nil {
+			return wrap.Errorf("failed to update deal date for trade log id %d: %w", dbOrder.ID, err)
+		}
+
+		// Отправляем сообщение в Telegram о размещении ордера на продажу
+		sellOrderTime := helpers.NowGMT7()
+		sellMessage := fmt.Sprintf(
+			"<b>💰 Ордер на продажу размещен</b>\n\n"+
+				"<b>Параметры ордера на покупку:</b>\n"+
+				"  Символ: %s\n"+
+				"  OrderID покупки: %s\n"+
+				"  Цена покупки: %.8f\n"+
+				"  Количество: %.8f\n"+
+				"  Дата открытия: %s\n\n"+
+				"<b>Ордер на продажу:</b>\n"+
+				"  OrderID продажи: %s\n"+
+				"  Цена продажи: %.8f\n"+
+				"  Количество: %.8f\n"+
+				"  Сумма: %.2f USDT\n\n"+
+				"<b>Время:</b> %s\n"+
+				"<b>Причина:</b> Ордер на покупку полностью исполнен (FILLED)\n"+
+				"<b>Действие:</b> Размещен ордер на продажу по верхней границе",
+			dbOrder.Symbol,
+			dbOrder.OrderId,
+			dbOrder.BuyPrice,
+			dbOrder.Amount,
+			dbOrder.OpenDate.Format("2006-01-02 15:04:05"),
+			placeOrderResult.OrderID,
+			dbOrder.UpLevel,
+			dbOrder.Amount,
+			dbOrder.UpLevel*dbOrder.Amount,
+			sellOrderTime.Format("2006-01-02 15:04:05 MST"),
+		)
+		_, err = u.telegramApi.Send(sellMessage)
+		if err != nil {
+			fmt.Printf("⚠️  Не удалось отправить сообщение в Telegram: %v\n", err)
+		}
+
+	case "PARTIALLY_CANCELED":
+		fmt.Printf("   ⚠️  Ордер частично отменен (PARTIALLY_CANCELED)\n")
+		updateTime := helpers.NowGMT7()
+
+		// Отправляем сообщение в Telegram
+		message := fmt.Sprintf(
+			"<b>⚠️ Ордер частично отменен</b>\n\n"+
+				"<b>Параметры ордера:</b>\n"+
+				"  Символ: %s\n"+
+				"  OrderID: %s\n"+
+				"  Цена покупки: %.8f\n"+
+				"  Количество: %.8f\n"+
+				"  Дата открытия: %s\n\n"+
+				"<b>Время:</b> %s\n"+
+				"<b>Причина:</b> Ордер частично отменен на бирже\n"+
+				"<b>Действие:</b> Ордер в статусе PARTIALLY_CANCELED\n"+
+				"<b>Исполнено:</b> %s / %s",
+			dbOrder.Symbol,
+			queryResult.OrderID,
+			dbOrder.BuyPrice,
+			dbOrder.Amount,
+			dbOrder.OpenDate.Format("2006-01-02 15:04:05"),
+			updateTime.Format("2006-01-02 15:04:05 MST"),
+			queryResult.ExecutedQty,
+			queryResult.OrigQty,
+		)
+		_, err = u.telegramApi.Send(message)
+		if err != nil {
+			fmt.Printf("⚠️  Не удалось отправить сообщение в Telegram: %v\n", err)
+		}
+	default:
+		updateTime := helpers.NowGMT7()
+
+		message := fmt.Sprintf(
+			"<b>⚠️ Ордер в неизвестном статусе</b>\n\n"+
+				"<b>Параметры ордера:</b>\n"+
+				"  Символ: %s\n"+
+				"  OrderID: %s\n"+
+				"  Цена покупки: %.8f\n"+
+				"  Количество: %.8f\n"+
+				"  Дата открытия: %s\n\n"+
+				"<b>Время:</b> %s\n"+
+				"<b>Причина:</b> Ордер с неизвестным статусом (%s)\n"+
 				"<b>Действие:</b> Ордер помечен как отмененный в базе данных",
 			dbOrder.Symbol,
 			dbOrder.OrderId,
 			dbOrder.BuyPrice,
 			dbOrder.Amount,
 			dbOrder.OpenDate.Format("2006-01-02 15:04:05"),
-			cancelTime.Format("2006-01-02 15:04:05 MST"),
-			len(*exchangeOrders),
+			updateTime.Format("2006-01-02 15:04:05 MST"),
+			queryResult.Status,
 		)
-		_, _ = u.telegramApi.Send(message)
+		_, err = u.telegramApi.Send(message)
+		if err != nil {
+			fmt.Printf("⚠️  Не удалось отправить сообщение в Telegram: %v\n", err)
+		}
 	}
 
 	return nil
