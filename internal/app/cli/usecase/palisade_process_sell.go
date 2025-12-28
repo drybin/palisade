@@ -159,7 +159,7 @@ func (u *PalisadeProcessSell) Process(ctx context.Context) error {
 			if err != nil {
 				return wrap.Errorf("failed to get next trade id: %w", err)
 			}
-			clientOrderId := fmt.Sprintf("Test_order_auto_sell_market_1_%d", nextOrderId)
+			clientOrderId := fmt.Sprintf("Prod_order_sell_market_%d", nextOrderId)
 
 			placeOrderResult, err := u.repo.NewOrder(
 				model.OrderParams{
@@ -365,7 +365,7 @@ func (u *PalisadeProcessSell) Process(ctx context.Context) error {
 		if err != nil {
 			return wrap.Errorf("failed to get next trade id: %w", err)
 		}
-		clientOrderId := fmt.Sprintf("Test_order_auto_sell_3_%d", nextOrderId)
+		clientOrderId := fmt.Sprintf("Prod_order_sell_%d", nextOrderId)
 
 		placeOrderResult, err := u.repo.NewOrder(
 			model.OrderParams{

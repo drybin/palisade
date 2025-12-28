@@ -135,7 +135,7 @@ func (u *PalisadeProcess) Process(ctx context.Context) error {
     if err != nil {
         return wrap.Errorf("failed to get next trade id: %w", err)
     }
-    clientOrderId := fmt.Sprintf("Test_order_auto_3_%d", nextOrderId)
+    clientOrderId := fmt.Sprintf("Prod_order_%d", nextOrderId)
     
     fmt.Printf("\n--- Размещаем ордер %s ---\n", coin.Symbol)
     fmt.Printf("Цена: %.8f\n", coin.Support)
