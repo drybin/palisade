@@ -63,7 +63,7 @@ func (u *PalisadeProcess) Process(ctx context.Context) error {
     
     cntOrdesFromTradeLog := len(ordersFromTradeLog)
     fmt.Printf("\n=== Найдено ордеров в trade_log %d ===\n", cntOrdesFromTradeLog)
-    if cntOrdesFromTradeLog > 1 {
+    if cntOrdesFromTradeLog >= 1 {
         fmt.Println("Найдено 1 или больше открытых ордеров, прекращаем работу")
         return nil
     }
