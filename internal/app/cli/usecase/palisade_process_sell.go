@@ -3,6 +3,7 @@ package usecase
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/drybin/palisade/internal/adapter/webapi"
@@ -75,7 +76,16 @@ func (u *PalisadeProcessSell) Process(ctx context.Context) error {
 	//	return wrap.Errorf("ошибка при получении ордеров с биржи для %s: %w", dbOrder.Symbol, err)
 	//}
 
-	queryResult, err := u.repo.GetOrderQuery(dbOrders[0].Symbol, dbOrders[0].OrderId)
+	// Определяем какой ордер проверять: если есть ордер на продажу, проверяем его, иначе - ордер на покупку
+	orderID := dbOrders[0].OrderId
+	if dbOrders[0].OrderId_sell != "" {
+		orderID = dbOrders[0].OrderId_sell
+		fmt.Printf("Проверяем статус ордера на продажу (SELL): %s\n", orderID)
+	} else {
+		fmt.Printf("Проверяем статус ордера на покупку (BUY): %s\n", orderID)
+	}
+
+	queryResult, err := u.repo.GetOrderQuery(dbOrders[0].Symbol, orderID)
 	if err != nil {
 		return wrap.Errorf("ошибка при получении ордера с биржи для %s: %w", dbOrder.Symbol, err)
 	}
@@ -121,6 +131,76 @@ func (u *PalisadeProcessSell) Process(ctx context.Context) error {
 
 	//Обрабатываем ордер Sell
 	if queryResult.Side == order.SELL.String() {
+		if queryResult.Status != "NEW" {
+			fmt.Printf("\n✅ Ордер на продажу завершен\n")
+			fmt.Printf("Статус: %s\n", queryResult.Status)
+			fmt.Printf("Symbol: %s\n", queryResult.Symbol)
+			fmt.Printf("OrderID: %s\n", queryResult.OrderID)
+			fmt.Printf("Цена исполнения: %s\n", queryResult.Price)
+			fmt.Printf("Количество: %s\n", queryResult.ExecutedQty)
+
+			// Обновляем close_date в базе данных
+			closeTime := helpers.NowGMT7()
+
+			// Вычисляем финальный баланс и цену продажи
+			executedQty, _ := strconv.ParseFloat(queryResult.ExecutedQty, 64)
+			sellPrice, _ := strconv.ParseFloat(queryResult.Price, 64)
+			closeBalance := executedQty * sellPrice
+
+			err = u.stateRepo.UpdateSuccesTradeLog(ctx, dbOrder.ID, closeTime, closeBalance, sellPrice)
+			if err != nil {
+				return wrap.Errorf("failed to update success trade log for id %d: %w", dbOrder.ID, err)
+			}
+			fmt.Printf("✅ Обновлен close_date в базе данных\n")
+
+			// Отправляем сообщение в Telegram
+			profit := closeBalance - dbOrder.OpenBalance
+			profitPercent := (profit / dbOrder.OpenBalance) * 100
+
+			telegramMessage := fmt.Sprintf(
+				"<b>💰 Ордер на продажу завершен</b>\n\n"+
+					"<b>Параметры сделки:</b>\n"+
+					"  Символ: %s\n"+
+					"  OrderID покупки: %s\n"+
+					"  OrderID продажи: %s\n"+
+					"  Статус: %s\n\n"+
+					"<b>Покупка:</b>\n"+
+					"  Цена: %.8f\n"+
+					"  Количество: %.8f\n"+
+					"  Сумма: %.2f USDT\n"+
+					"  Дата: %s\n\n"+
+					"<b>Продажа:</b>\n"+
+					"  Цена: %.8f\n"+
+					"  Количество: %s\n"+
+					"  Сумма: %.2f USDT\n"+
+					"  Дата: %s\n\n"+
+					"<b>Результат:</b>\n"+
+					"  Прибыль: %.2f USDT (%.2f%%)\n"+
+					"<b>Время:</b> %s",
+				dbOrder.Symbol,
+				dbOrder.OrderId,
+				queryResult.OrderID,
+				queryResult.Status,
+				dbOrder.BuyPrice,
+				dbOrder.Amount,
+				dbOrder.OpenBalance,
+				dbOrder.OpenDate.Format("2006-01-02 15:04:05"),
+				sellPrice,
+				queryResult.ExecutedQty,
+				closeBalance,
+				closeTime.Format("2006-01-02 15:04:05"),
+				profit,
+				profitPercent,
+				closeTime.Format("2006-01-02 15:04:05 MST"),
+			)
+			_, err = u.telegramApi.Send(telegramMessage)
+			if err != nil {
+				fmt.Printf("⚠️  Не удалось отправить сообщение в Telegram: %v\n", err)
+			}
+
+			return nil
+		}
+
 		msg := ""
 		// Получаем текущую цену пары
 		currentPrice, err := u.repo.GetAvgPrice(ctx, dbOrder.Symbol)
