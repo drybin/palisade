@@ -101,6 +101,7 @@ func (u *PalisadeProcess) Process(ctx context.Context) error {
 		LastCheck:             time.Time{}, // Не проверяем время последней проверки
 		MinTimeSinceLastCheck: 0,           // Всегда обновляем
 		MaxVolatilityPercent:  5.0,
+		Percentile:            90.0,
 		Debug:                 false, // Не выводим детальный лог
 	})
 
