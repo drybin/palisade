@@ -56,22 +56,27 @@ func NewContainer(
 	}
 
 	stateRepo := registry.NewStateRepository(db)
+	
+	// Создаем сервисы
+	palisadeCheckerService := service.NewPalisadeCheckerService(mexcApi, stateRepo)
+	
 	container := Container{
 		Usecases: &Usecases{
 			HelloWorld: usecase.NewHelloWorldUsecase(),
-			PalisadeProcess: usecase.NewPalisadeProcessUsecase(
-				mexcApi,
-				mexcV2Api,
-				telegramApi,
-				service.NewTradingPair(),
-				service.NewPalisadeLevels(mexcApi, mexcV2Api),
-				service.NewByuService(mexcApi, mexcV2Api, stateRepo),
-				stateRepo,
-			),
-			PalisadeProcessSell:   usecase.NewPalisadeProcessSellUsecase(mexcApi, stateRepo, telegramApi),
-			GetCoinList:           usecase.NewGetCoinListUsecase(mexcApi, stateRepo),
-			CheckPalisadeCoinList: usecase.NewCheckPalisadeCoinListUsecase(mexcApi, stateRepo),
-			CheckPalisadeCoin:     usecase.NewCheckPalisadeCoinUsecase(mexcApi, stateRepo),
+		PalisadeProcess: usecase.NewPalisadeProcessUsecase(
+			mexcApi,
+			mexcV2Api,
+			telegramApi,
+			service.NewTradingPair(),
+			service.NewPalisadeLevels(mexcApi, mexcV2Api),
+			service.NewByuService(mexcApi, mexcV2Api, stateRepo),
+			palisadeCheckerService,
+			stateRepo,
+		),
+		PalisadeProcessSell:   usecase.NewPalisadeProcessSellUsecase(mexcApi, stateRepo, telegramApi),
+		GetCoinList:           usecase.NewGetCoinListUsecase(mexcApi, stateRepo),
+		CheckPalisadeCoinList: usecase.NewCheckPalisadeCoinListUsecase(palisadeCheckerService, stateRepo),
+		CheckPalisadeCoin:     usecase.NewCheckPalisadeCoinUsecase(palisadeCheckerService, stateRepo),
 		},
 		MexcSpot: mexcSpot,
 		Clean: func() {

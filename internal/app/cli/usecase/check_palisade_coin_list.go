@@ -3,14 +3,10 @@ package usecase
 import (
 	"context"
 	"fmt"
-	"strings"
 	"time"
 
-	"github.com/drybin/palisade/internal/adapter/webapi"
-	"github.com/drybin/palisade/internal/domain/enum"
-	"github.com/drybin/palisade/internal/domain/model"
-	"github.com/drybin/palisade/internal/domain/model/mexc"
 	"github.com/drybin/palisade/internal/domain/repo"
+	"github.com/drybin/palisade/internal/domain/service"
 	"github.com/drybin/palisade/pkg/wrap"
 )
 
@@ -19,17 +15,17 @@ type ICheckPalisadeCoinList interface {
 }
 
 type CheckPalisadeCoinList struct {
-	repo      *webapi.MexcWebapi
-	stateRepo repo.IStateRepository
+	checkerService *service.PalisadeCheckerService
+	stateRepo      repo.IStateRepository
 }
 
 func NewCheckPalisadeCoinListUsecase(
-	repo *webapi.MexcWebapi,
+	checkerService *service.PalisadeCheckerService,
 	stateRepo repo.IStateRepository,
 ) *CheckPalisadeCoinList {
 	return &CheckPalisadeCoinList{
-		repo:      repo,
-		stateRepo: stateRepo,
+		checkerService: checkerService,
+		stateRepo:      stateRepo,
 	}
 }
 
@@ -60,73 +56,40 @@ func (u *CheckPalisadeCoinList) Process(ctx context.Context, debug bool) error {
 		if debug {
 			fmt.Printf("[%d/%d] Обрабатываем монету: %s\n", currentIndex, totalCount, coin.Symbol)
 		}
-		// проверяем последнюю дату проверки
-		lastCheck := coin.LastCheck
-		if time.Since(lastCheck) < 180*time.Minute {
-			continue
-		}
 
-		klines, err := u.repo.GetKlines(
-			model.PairWithLevels{
-				Pair: model.Pair{
-					CoinFirst:  model.Coin{Name: coin.BaseAsset, SymbolId: coin.Symbol},
-					CoinSecond: model.Coin{Name: coin.QuoteAsset, SymbolId: coin.Symbol},
-				},
-			},
-			enum.MINUTES_15,
-		)
+		// Используем сервис для проверки и обновления монеты
+		result, err := u.checkerService.CheckAndUpdateCoin(ctx, service.CheckCoinParams{
+			Symbol:               coin.Symbol,
+			BaseAsset:            coin.BaseAsset,
+			QuoteAsset:           coin.QuoteAsset,
+			LastCheck:            coin.LastCheck,
+			MinTimeSinceLastCheck: 180 * time.Minute,
+			MaxVolatilityPercent: 5.0,
+			Debug:                debug,
+		})
+
+		// Обрабатываем результат
 		if err != nil {
-
-			// проверить есть ли в коде ошибки текст {"msg":"Invalid symbol.","code":-1121,"_extend":null} и если есть, то пропустить эту монету
-			if strings.Contains(err.Error(), "Invalid symbol.") {
-				fmt.Println("Invalid symbol", coin.Symbol)
-				continue
+			// Если ошибка критическая, прерываем обработку
+			if result != nil && !result.Skipped {
+				return err
 			}
-
-			continue
-			// return wrap.Errorf("failed to get klines: %w", err)
-		}
-
-		// Фильтруем свечи за последние 4 часа
-		filteredKlines := filterKlinesLast4Hours(*klines)
-		if len(filteredKlines) == 0 {
+			// Иначе логируем и продолжаем
 			if debug {
-				fmt.Printf("Нет свечей за последние 4 часа для %s, пропускаем\n", coin.Symbol)
+				fmt.Printf("Ошибка при обработке %s: %v\n", coin.Symbol, err)
 			}
 			continue
 		}
 
-		// Анализируем флет с максимальной волатильностью 5%
-		maxVolatilityPercent := 5.0
-		flatAnalysis := filteredKlines.AnalyzeFlat(maxVolatilityPercent)
-
-		// Выводим результаты анализа только при флаге debug
-		if debug {
-			fmt.Printf("\n=== Анализ для %s ===\n", coin.Symbol)
-			fmt.Printf("Количество свечей (всего/за последние 4 часа): %d/%d\n", len(*klines), len(filteredKlines))
-			fmt.Printf("Во флете: %v\n", flatAnalysis.IsFlat)
-			fmt.Printf("Нижняя граница (Support): %.8f\n", flatAnalysis.Support)
-			fmt.Printf("Верхняя граница (Resistance): %.8f\n", flatAnalysis.Resistance)
-			fmt.Printf("Диапазон: %.8f\n", flatAnalysis.Range)
-			fmt.Printf("Диапазон в процентах: %.2f%%\n", flatAnalysis.RangePercent)
-			fmt.Printf("Средняя цена: %.8f\n", flatAnalysis.AvgPrice)
-			fmt.Printf("Волатильность: %.2f%%\n", flatAnalysis.Volatility)
-			fmt.Printf("Максимальная просадка: %.2f%%\n", flatAnalysis.MaxDrawdown)
-			fmt.Printf("Максимальный рост: %.2f%%\n", flatAnalysis.MaxRise)
-			fmt.Printf("================================\n\n")
-		}
-		// Обновляем статус isPalisade в базе данных
-		err = u.stateRepo.UpdateIsPalisade(ctx, coin.Symbol, flatAnalysis.IsFlat)
-		if err != nil {
-			return wrap.Errorf("failed to update isPalisade for coin %s: %w", coin.Symbol, err)
-		}
-
-		if flatAnalysis.IsFlat {
-			err = u.stateRepo.UpdatePalisadeParams(ctx, coin.Symbol, flatAnalysis.Support, flatAnalysis.Resistance, flatAnalysis.Range, flatAnalysis.RangePercent, flatAnalysis.AvgPrice, flatAnalysis.Volatility, flatAnalysis.MaxDrawdown, flatAnalysis.MaxRise)
-			if err != nil {
-				return wrap.Errorf("failed to update palisade params for coin %s: %w", coin.Symbol, err)
+		// Если монета пропущена, выводим причину в debug режиме
+		if result.Skipped {
+			if debug {
+				fmt.Printf("Монета %s пропущена: %s\n", coin.Symbol, result.SkipReason)
 			}
+			continue
 		}
+
+		// Монета успешно обработана
 		totalProcessed++
 		time.Sleep(3 * time.Second)
 	}
@@ -137,26 +100,4 @@ func (u *CheckPalisadeCoinList) Process(ctx context.Context, debug bool) error {
 	fmt.Printf("Общее время обработки: %v\n", elapsed)
 	fmt.Printf("Обработано монет: %d из %d\n", totalProcessed, totalCount)
 	return nil
-}
-
-// filterKlinesLast4Hours фильтрует свечи, оставляя только те, которые открылись в последние 4 часа
-func filterKlinesLast4Hours(klines mexc.Klines) mexc.Klines {
-	if len(klines) == 0 {
-		return klines
-	}
-
-	// Вычисляем время 4 часа назад от текущего момента (в миллисекундах)
-	now := time.Now()
-	fourHoursAgo := now.Add(-4 * time.Hour)
-	cutoffTime := fourHoursAgo.Unix() * 1000 // Unix timestamp в миллисекундах
-
-	filtered := make(mexc.Klines, 0)
-	for _, kline := range klines {
-		// OpenTime в миллисекундах, сравниваем с cutoffTime
-		if kline.OpenTime >= cutoffTime {
-			filtered = append(filtered, kline)
-		}
-	}
-
-	return filtered
 }
