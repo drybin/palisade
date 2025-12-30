@@ -136,16 +136,24 @@ func (u *PalisadeProcessSell) Process(ctx context.Context) error {
 			fmt.Printf("Статус: %s\n", queryResult.Status)
 			fmt.Printf("Symbol: %s\n", queryResult.Symbol)
 			fmt.Printf("OrderID: %s\n", queryResult.OrderID)
-			fmt.Printf("Цена исполнения: %s\n", queryResult.Price)
-			fmt.Printf("Количество: %s\n", queryResult.ExecutedQty)
+			fmt.Printf("Тип ордера: %s\n", queryResult.Type)
+			fmt.Printf("Количество исполнено: %s\n", queryResult.ExecutedQty)
+			fmt.Printf("Итоговая сумма (USDT): %s\n", queryResult.CummulativeQuoteQty)
 
 			// Обновляем close_date в базе данных
 			closeTime := helpers.NowGMT7()
 
 			// Вычисляем финальный баланс и цену продажи
 			executedQty, _ := strconv.ParseFloat(queryResult.ExecutedQty, 64)
-			sellPrice, _ := strconv.ParseFloat(queryResult.Price, 64)
-			closeBalance := executedQty * sellPrice
+			// Используем CummulativeQuoteQty - это итоговая сумма в USDT
+			closeBalance, _ := strconv.ParseFloat(queryResult.CummulativeQuoteQty, 64)
+			// Рассчитываем среднюю цену продажи
+			sellPrice := closeBalance / executedQty
+
+			fmt.Printf("ExecutedQty: %s\n", queryResult.ExecutedQty)
+			fmt.Printf("CummulativeQuoteQty: %s\n", queryResult.CummulativeQuoteQty)
+			fmt.Printf("Средняя цена продажи: %.8f\n", sellPrice)
+			fmt.Printf("Итоговая сумма: %.2f USDT\n", closeBalance)
 
 			err = u.stateRepo.UpdateSuccesTradeLog(ctx, dbOrder.ID, closeTime, closeBalance, sellPrice)
 			if err != nil {
