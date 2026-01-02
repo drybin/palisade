@@ -243,6 +243,23 @@ func (u *PalisadeProcessSell) Process(ctx context.Context) error {
 				)
 			}
 
+			// Отменяем текущий лимитный ордер на продажу перед размещением маркет-ордера
+			fmt.Printf("\n--- Отменяем текущий ордер на продажу ---\n")
+			fmt.Printf("OrderID: %s\n", orderID)
+
+			cancelResp, err := u.repo.CancelOrder(dbOrder.Symbol, orderID)
+			if err != nil {
+				fmt.Printf("❌ Ошибка при отмене ордера: %v\n", err)
+				return wrap.Errorf("failed to cancel order %s: %w", orderID, err)
+			}
+
+			fmt.Printf("✅ Результат отмены ордера:\n")
+			fmt.Printf("   Success: %v\n", cancelResp.Success)
+			fmt.Printf("   Code: %d\n", cancelResp.Code)
+			for _, result := range cancelResp.Data {
+				fmt.Printf("   OrderID: %s, ErrorCode: %d, ErrorMsg: %s\n", result.OrderID, result.ErrorCode, result.ErrorMsg)
+			}
+
 			nextOrderId, err := u.stateRepo.GetNextTradeId(ctx)
 			if err != nil {
 				return wrap.Errorf("failed to get next trade id: %w", err)
