@@ -260,6 +260,10 @@ func (u *PalisadeProcessSell) Process(ctx context.Context) error {
 				fmt.Printf("   OrderID: %s, ErrorCode: %d, ErrorMsg: %s\n", result.OrderID, result.ErrorCode, result.ErrorMsg)
 			}
 
+			// Ждем 10 секунд, чтобы биржа обработала отмену ордера
+			fmt.Println("⏳ Ожидание 10 секунд перед размещением маркет-ордера...")
+			time.Sleep(10 * time.Second)
+
 			nextOrderId, err := u.stateRepo.GetNextTradeId(ctx)
 			if err != nil {
 				return wrap.Errorf("failed to get next trade id: %w", err)
