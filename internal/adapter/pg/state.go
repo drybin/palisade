@@ -236,6 +236,37 @@ func (u StateRepository) GetCoinsToProcess(
 	return result, nil
 }
 
+func (u StateRepository) GetCoinsToProcessTPTU(
+	ctx context.Context,
+	limit int,
+	offset int,
+) ([]mexc.SymbolDetail, error) {
+	db := palisade_database.New(u.Postgree)
+
+	coins, err := db.GetCoinsToProcessTPTU(ctx, palisade_database.GetCoinsToProcessTPTUParams{
+		Limit:  int32(limit),
+		Offset: int32(offset),
+	})
+
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return []mexc.SymbolDetail{}, nil
+		}
+		return nil, wrap.Errorf("failed to get coins to process TPTU from Postgree: %w", err)
+	}
+
+	result := make([]mexc.SymbolDetail, 0, len(coins))
+	for _, coin := range coins {
+		symbolDetail, err := mapCoinToDomainModel(coin)
+		if err != nil {
+			return nil, wrap.Errorf("failed to map coin to domain model: %w", err)
+		}
+		result = append(result, *symbolDetail)
+	}
+
+	return result, nil
+}
+
 func (u StateRepository) GetNextTradeId(ctx context.Context) (int, error) {
 	db := palisade_database.New(u.Postgree)
 

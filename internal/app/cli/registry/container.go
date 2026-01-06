@@ -25,6 +25,7 @@ type Container struct {
 type Usecases struct {
 	HelloWorld            *usecase.HelloWorld
 	PalisadeProcess       *usecase.PalisadeProcess
+	PalisadeProcessMulti  *usecase.PalisadeProcessMulti
 	PalisadeProcessSell   *usecase.PalisadeProcessSell
 	GetCoinList           *usecase.GetCoinList
 	CheckPalisadeCoinList *usecase.CheckPalisadeCoinList
@@ -64,6 +65,16 @@ func NewContainer(
 		Usecases: &Usecases{
 			HelloWorld: usecase.NewHelloWorldUsecase(),
 		PalisadeProcess: usecase.NewPalisadeProcessUsecase(
+			mexcApi,
+			mexcV2Api,
+			telegramApi,
+			service.NewTradingPair(),
+			service.NewPalisadeLevels(mexcApi, mexcV2Api),
+			service.NewByuService(mexcApi, mexcV2Api, stateRepo),
+			palisadeCheckerService,
+			stateRepo,
+		),
+		PalisadeProcessMulti: usecase.NewPalisadeProcessMultiUsecase(
 			mexcApi,
 			mexcV2Api,
 			telegramApi,

@@ -82,7 +82,7 @@ func (u *PalisadeProcess) Process(ctx context.Context) error {
 		return nil
 	}
 
-	coins, err := u.stateRepo.GetCoinsToProcess(ctx, 10, 0)
+	coins, err := u.stateRepo.GetCoinsToProcessTPTU(ctx, 10, 0)
 	if err != nil {
 		return wrap.Errorf("failed to get coins to process: %w", err)
 	}

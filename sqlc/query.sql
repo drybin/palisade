@@ -85,7 +85,7 @@ UPDATE coins
 SET support = $1, resistance = $2, rangeValue = $3, rangePercent = $4, avgPrice = $5, volatility = $6, maxDrawdown = $7, maxRise = $8
 WHERE symbol = $9;
 
--- name: GetCoinsToProcess :many
+-- name: GetCoinsToProcessTPTU :many
 SELECT * FROM coins
 WHERE 
     isSpotTradingAllowed = true
@@ -94,6 +94,18 @@ WHERE
     --AND volatility < 0.4
     AND quoteasset = 'USDT'
     AND symbol = 'TPTUUSDT'
+ORDER BY lastcheck DESC
+LIMIT $1
+OFFSET $2;
+
+-- name: GetCoinsToProcess :many
+SELECT * FROM coins
+WHERE 
+    isSpotTradingAllowed = true
+    AND isPalisade = true
+    AND volatility > 0.2
+    AND volatility < 0.5
+    AND quoteasset = 'USDT'
 ORDER BY lastcheck DESC
 LIMIT $1
 OFFSET $2;

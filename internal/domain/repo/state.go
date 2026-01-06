@@ -22,6 +22,7 @@ type IStateRepository interface {
 	GetCoinInfo(context.Context, string) (*mexc.SymbolDetail, error)
 	GetCoins(context.Context, GetCoinsParams) ([]mexc.SymbolDetail, error)
 	GetCoinsToProcess(context.Context, int, int) ([]mexc.SymbolDetail, error)
+	GetCoinsToProcessTPTU(context.Context, int, int) ([]mexc.SymbolDetail, error)
 	UpdateIsPalisade(context.Context, string, bool) error
 	UpdatePalisadeParams(context.Context, string, float64, float64, float64, float64, float64, float64, float64, float64) error
 	GetNextTradeId(context.Context) (int, error)

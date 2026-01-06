@@ -168,10 +168,9 @@ SELECT id, date, symbol, status, baseasset, baseassetprecision, quoteasset, quot
 WHERE 
     isSpotTradingAllowed = true
     AND isPalisade = true
-    --AND volatility > 0.1
-    --AND volatility < 0.4
+    AND volatility > 0.2
+    AND volatility < 0.5
     AND quoteasset = 'USDT'
-    AND symbol = 'TPTUUSDT'
 ORDER BY lastcheck DESC
 LIMIT $1
 OFFSET $2
@@ -184,6 +183,80 @@ type GetCoinsToProcessParams struct {
 
 func (q *Queries) GetCoinsToProcess(ctx context.Context, arg GetCoinsToProcessParams) ([]Coin, error) {
 	rows, err := q.db.Query(ctx, getCoinsToProcess, arg.Limit, arg.Offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Coin
+	for rows.Next() {
+		var i Coin
+		if err := rows.Scan(
+			&i.ID,
+			&i.Date,
+			&i.Symbol,
+			&i.Status,
+			&i.Baseasset,
+			&i.Baseassetprecision,
+			&i.Quoteasset,
+			&i.Quoteprecision,
+			&i.Quoteassetprecision,
+			&i.Basecommissionprecision,
+			&i.Quotecommissionprecision,
+			&i.Ordertypes,
+			&i.Isspottradingallowed,
+			&i.Ismargintradingallowed,
+			&i.Quoteamountprecision,
+			&i.Basesizeprecision,
+			&i.Permissions,
+			&i.Maxquoteamount,
+			&i.Makercommission,
+			&i.Takercommission,
+			&i.Quoteamountprecisionmarket,
+			&i.Maxquoteamountmarket,
+			&i.Fullname,
+			&i.Tradesidetype,
+			&i.Ispalisade,
+			&i.Lastcheck,
+			&i.Support,
+			&i.Resistance,
+			&i.Rangevalue,
+			&i.Rangepercent,
+			&i.Avgprice,
+			&i.Volatility,
+			&i.Maxdrawdown,
+			&i.Maxrise,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getCoinsToProcessTPTU = `-- name: GetCoinsToProcessTPTU :many
+SELECT id, date, symbol, status, baseasset, baseassetprecision, quoteasset, quoteprecision, quoteassetprecision, basecommissionprecision, quotecommissionprecision, ordertypes, isspottradingallowed, ismargintradingallowed, quoteamountprecision, basesizeprecision, permissions, maxquoteamount, makercommission, takercommission, quoteamountprecisionmarket, maxquoteamountmarket, fullname, tradesidetype, ispalisade, lastcheck, support, resistance, rangevalue, rangepercent, avgprice, volatility, maxdrawdown, maxrise FROM coins
+WHERE 
+    isSpotTradingAllowed = true
+    AND isPalisade = true
+    --AND volatility > 0.1
+    --AND volatility < 0.4
+    AND quoteasset = 'USDT'
+    AND symbol = 'TPTUUSDT'
+ORDER BY lastcheck DESC
+LIMIT $1
+OFFSET $2
+`
+
+type GetCoinsToProcessTPTUParams struct {
+	Limit  int32
+	Offset int32
+}
+
+func (q *Queries) GetCoinsToProcessTPTU(ctx context.Context, arg GetCoinsToProcessTPTUParams) ([]Coin, error) {
+	rows, err := q.db.Query(ctx, getCoinsToProcessTPTU, arg.Limit, arg.Offset)
 	if err != nil {
 		return nil, err
 	}
