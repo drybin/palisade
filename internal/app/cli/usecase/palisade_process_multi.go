@@ -3,7 +3,9 @@ package usecase
 import (
 	"context"
 	"fmt"
+	"math"
 	"math/rand"
+	"strconv"
 	"time"
 
 	"github.com/drybin/palisade/internal/adapter/webapi"
@@ -234,6 +236,31 @@ func (u *PalisadeProcessMulti) Process(ctx context.Context) error {
 		}
 
 		quantity := 2.0 / coin.Support
+
+		// Округлить количество согласно baseSizePrecision
+		baseSizePrecision, err := strconv.ParseFloat(coin.BaseSizePrecision, 64)
+		if err != nil {
+			fmt.Printf("❌ Ошибка парсинга baseSizePrecision для %s: %v\n", coin.Symbol, err)
+			continue
+		}
+
+		if baseSizePrecision == 0 {
+			// Если baseSizePrecision равно 0, округлить до ближайшего целого в меньшую сторону
+			quantity = math.Floor(quantity)
+			fmt.Printf("📏 Округление количества до целого: %.8f → %.8f (baseSizePrecision: %.8f)\n",
+				2.0/coin.Support, quantity, baseSizePrecision)
+		} else {
+			// Округлить количество до ближайшего кратного baseSizePrecision
+			quantity = math.Floor(quantity/baseSizePrecision) * baseSizePrecision
+			fmt.Printf("📏 Округление количества: %.8f → %.8f (baseSizePrecision: %.8f)\n",
+				2.0/coin.Support, quantity, baseSizePrecision)
+		}
+
+		if quantity <= 0 {
+			fmt.Printf("❌ Округленное количество %f недопустимо для ордера %s\n", quantity, coin.Symbol)
+			continue
+		}
+
 		nextOrderId, err := u.stateRepo.GetNextTradeId(ctx)
 		if err != nil {
 			fmt.Printf("❌ Ошибка получения ID ордера для %s: %v\n", coin.Symbol, err)
