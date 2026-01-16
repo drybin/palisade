@@ -243,6 +243,13 @@ func (u *PalisadeProcessSell) Process(ctx context.Context) error {
 				)
 			}
 
+			// Если текущая цена меньше цены покупки ордера, прекращаем выполнение
+			if currentPrice.Price < dbOrder.BuyPrice {
+				fmt.Printf("⚠️  Текущая цена (%.8f) меньше цены покупки ордера (%.8f), прекращаем выполнение\n",
+					currentPrice.Price, dbOrder.BuyPrice)
+				return nil
+			}
+
 			// Отменяем текущий лимитный ордер на продажу перед размещением маркет-ордера
 			fmt.Printf("\n--- Отменяем текущий ордер на продажу ---\n")
 			fmt.Printf("OrderID: %s\n", orderID)
