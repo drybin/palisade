@@ -3,6 +3,7 @@ package usecase
 import (
 	"context"
 	"fmt"
+	"math"
 	"strconv"
 	"time"
 
@@ -10,6 +11,7 @@ import (
 	"github.com/drybin/palisade/internal/domain/enum/order"
 	"github.com/drybin/palisade/internal/domain/helpers"
 	"github.com/drybin/palisade/internal/domain/model"
+	"github.com/drybin/palisade/internal/domain/model/mexc"
 	"github.com/drybin/palisade/internal/domain/repo"
 	"github.com/drybin/palisade/pkg/wrap"
 )
@@ -277,11 +279,51 @@ func (u *PalisadeProcessSell) Process(ctx context.Context) error {
 			}
 			clientOrderId := fmt.Sprintf("Prod_order_sell_market_%d", nextOrderId)
 
-			fmt.Printf("📏 Используем количество из ордера: %.8f\n", dbOrder.Amount)
+			// Получить информацию о символе для правильного округления количества
+			symbolInfo, err := u.repo.GetSymbolInfo(ctx, dbOrder.Symbol)
+			if err != nil {
+				fmt.Printf("❌ Ошибка получения информации о символе %s: %v\n", dbOrder.Symbol, err)
+				return wrap.Errorf("failed to get symbol info for %s: %w", dbOrder.Symbol, err)
+			}
 
-			if dbOrder.Amount <= 0 {
-				fmt.Printf("❌ Количество %f недопустимо для ордера\n", dbOrder.Amount)
-				return wrap.Errorf("quantity %f is invalid for order", dbOrder.Amount)
+			// Найти нужный символ в списке
+			var symbolDetail *mexc.SymbolDetail
+			for _, sym := range symbolInfo.Symbols {
+				if sym.Symbol == dbOrder.Symbol {
+					symbolDetail = &sym
+					break
+				}
+			}
+
+			if symbolDetail == nil {
+				fmt.Printf("❌ Символ %s не найден в информации о бирже\n", dbOrder.Symbol)
+				return wrap.Errorf("symbol %s not found in exchange info", dbOrder.Symbol)
+			}
+
+			// Округлить количество согласно baseSizePrecision
+			baseSizePrecision, err := strconv.ParseFloat(symbolDetail.BaseSizePrecision, 64)
+			if err != nil {
+				fmt.Printf("❌ Ошибка парсинга baseSizePrecision для %s: %v\n", dbOrder.Symbol, err)
+				return wrap.Errorf("failed to parse baseSizePrecision for %s: %w", dbOrder.Symbol, err)
+			}
+
+			//nolint:ineffassign,staticcheck
+			roundedQuantity := dbOrder.Amount
+			if baseSizePrecision == 0 {
+				// Если baseSizePrecision равно 0, округлить до ближайшего целого в меньшую сторону
+				roundedQuantity = math.Floor(dbOrder.Amount)
+				fmt.Printf("📏 Округление количества до целого: %.8f → %.8f (baseSizePrecision: %.8f)\n",
+					dbOrder.Amount, roundedQuantity, baseSizePrecision)
+			} else {
+				// Округлить количество до ближайшего кратного baseSizePrecision
+				roundedQuantity = math.Floor(dbOrder.Amount/baseSizePrecision) * baseSizePrecision
+				fmt.Printf("📏 Округление количества: %.8f → %.8f (baseSizePrecision: %.8f)\n",
+					dbOrder.Amount, roundedQuantity, baseSizePrecision)
+			}
+
+			if roundedQuantity <= 0 {
+				fmt.Printf("❌ Округленное количество %f недопустимо для ордера\n", roundedQuantity)
+				return wrap.Errorf("rounded quantity %f is invalid for order", roundedQuantity)
 			}
 
 			placeOrderResult, err := u.repo.NewOrder(
@@ -289,7 +331,7 @@ func (u *PalisadeProcessSell) Process(ctx context.Context) error {
 					Symbol:           dbOrder.Symbol,
 					Side:             order.SELL,
 					OrderType:        order.MARKET,
-					Quantity:         dbOrder.Amount,
+					Quantity:         roundedQuantity,
 					NewClientOrderId: clientOrderId,
 				},
 			)
