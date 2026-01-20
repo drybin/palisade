@@ -245,8 +245,8 @@ func (u *PalisadeProcessSell) Process(ctx context.Context) error {
 				)
 			}
 
-			// Если текущая цена меньше цены покупки ордера, прекращаем выполнение
-			if currentPrice.Price < dbOrder.BuyPrice {
+			// Если текущая цена меньше цены покупки ордера и не вышла за уровень вниз, прекращаем выполнение
+			if currentPrice.Price < dbOrder.BuyPrice && currentPrice.Price > dbOrder.DownLevel {
 				fmt.Printf("⚠️  Текущая цена (%.8f) меньше цены покупки ордера (%.8f), прекращаем выполнение\n",
 					currentPrice.Price, dbOrder.BuyPrice)
 				return nil
