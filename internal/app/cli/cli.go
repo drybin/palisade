@@ -29,6 +29,7 @@ func Run(config *config.Config) error {
 	app.Usage = cliAppDesc
 	app.Commands = []*cliV2.Command{
 		command.NewHelloWorldCommand(cnt.Usecases.HelloWorld),
+		command.NewCheckSwapCommand(cnt.Usecases.CheckSwap),
 		command.NewPalisadeProcessCommand(cnt.Usecases.PalisadeProcess),
 		command.NewPalisadeProcessMultiCommand(cnt.Usecases.PalisadeProcessMulti),
 		command.NewPalisadeProcessSellCommand(cnt.Usecases.PalisadeProcessSell),

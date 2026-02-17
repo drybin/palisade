@@ -3,9 +3,22 @@ package model
 import (
     "fmt"
     "strconv"
-    
+    "strings"
+
     "github.com/drybin/palisade/internal/domain/enum/order"
 )
+
+// formatFloatAPI форматирует float с фиксированной точностью (8 знаков) и убирает хвостовые нули,
+// чтобы в API не уходил float-шум (например 0.036000000000000004) и не нарушался scale.
+func formatFloatAPI(v float64) string {
+    if v == float64(int64(v)) {
+        return fmt.Sprintf("%.0f", v)
+    }
+    s := strconv.FormatFloat(v, 'f', 8, 64)
+    s = strings.TrimRight(s, "0")
+    s = strings.TrimRight(s, ".")
+    return s
+}
 
 type OrderParams struct {
     Symbol           string
@@ -32,15 +45,9 @@ func (o OrderParams) GetOrderType() *string {
 }
 
 func (o OrderParams) GetPrice() string {
-    if o.Price == float64(int64(o.Price)) {
-        return fmt.Sprintf("%.0f", o.Price)
-    }
-    return strconv.FormatFloat(o.Price, 'f', -1, 64)
+    return formatFloatAPI(o.Price)
 }
 
 func (o OrderParams) GetQuantity() string {
-    if o.Quantity == float64(int64(o.Quantity)) {
-        return fmt.Sprintf("%.0f", o.Quantity)
-    }
-    return strconv.FormatFloat(o.Quantity, 'f', -1, 64)
+    return formatFloatAPI(o.Quantity)
 }
