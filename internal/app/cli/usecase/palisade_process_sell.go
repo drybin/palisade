@@ -345,6 +345,12 @@ func (u *PalisadeProcessSell) Process(ctx context.Context) error {
 			fmt.Printf("Symbol: %s\n", placeOrderResult.Symbol)
 			fmt.Printf("Причина: %s\n", msg)
 
+			// Сохраняем новый orderId_sell для маркет-ордера
+			err = u.stateRepo.UpdateSellOrderIdTradeLog(ctx, dbOrder.ID, placeOrderResult.OrderID)
+			if err != nil {
+				return wrap.Errorf("failed to save sell order id: %w", err)
+			}
+
 			// Отправляем сообщение в Telegram
 			marketOrderTime := helpers.NowGMT7()
 			telegramMessage := fmt.Sprintf(
