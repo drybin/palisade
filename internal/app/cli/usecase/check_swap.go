@@ -14,7 +14,7 @@ import (
 )
 
 type ICheckSwap interface {
-	Process(ctx context.Context) error
+	Process(ctx context.Context, quiet bool) error
 }
 
 type CheckSwap struct {
@@ -26,7 +26,7 @@ func NewCheckSwapUsecase(repo *webapi.MexcWebapi, stateRepo repo.IStateRepositor
 	return &CheckSwap{repo: repo, stateRepo: stateRepo}
 }
 
-func (u *CheckSwap) Process(ctx context.Context) error {
+func (u *CheckSwap) Process(ctx context.Context, quiet bool) error {
 	tickers, err := u.repo.GetAllTickerPrices(ctx)
 	if err != nil {
 		return wrap.Errorf("failed to get ticker prices: %w", err)
@@ -41,6 +41,54 @@ func (u *CheckSwap) Process(ctx context.Context) error {
 		}
 		priceMap[t.Symbol] = p
 	}
+
+	// Тип и расчёт allChains вынесены для использования в обоих режимах
+	type chainProfit struct {
+		baseA, baseB string
+		profit       float64
+	}
+	allowedHubs := map[string]bool{"BTC": true, "ETH": true, "USDC": true}
+	baseAssets := make([]string, 0)
+	for symbol := range priceMap {
+		if strings.HasSuffix(symbol, "USDT") && len(symbol) > 4 {
+			base := symbol[:len(symbol)-4]
+			baseAssets = append(baseAssets, base)
+		}
+	}
+	sort.Strings(baseAssets)
+	var allChains []chainProfit
+	for i := 0; i < len(baseAssets); i++ {
+		for j := 0; j < len(baseAssets); j++ {
+			if i == j {
+				continue
+			}
+			baseA, baseB := baseAssets[i], baseAssets[j]
+			if !allowedHubs[baseA] && !allowedHubs[baseB] {
+				continue
+			}
+			coinA := mexc.SymbolDetail{BaseAsset: baseA, Symbol: baseA + "USDT", QuoteAsset: "USDT"}
+			coinB := mexc.SymbolDetail{BaseAsset: baseB, Symbol: baseB + "USDT", QuoteAsset: "USDT"}
+			res, ok := u.calcChainProfit(priceMap, &coinA, &coinB)
+			if !ok {
+				continue
+			}
+			allChains = append(allChains, chainProfit{baseA, baseB, res.profitPercent})
+		}
+	}
+	sort.Slice(allChains, func(i, j int) bool { return allChains[i].profit > allChains[j].profit })
+
+	if quiet {
+		n := 0
+		for _, c := range allChains {
+			if c.profit <= 1 {
+				continue
+			}
+			n++
+			fmt.Printf("%d. USDT -> %s -> %s -> USDT  |  %.4f%%\n", n, c.baseA, c.baseB, c.profit)
+		}
+		return nil
+	}
+
 	fmt.Printf("Тикеров с ценой: %d\n", len(priceMap))
 
 	spotTradingAllowed := true
@@ -150,42 +198,7 @@ func (u *CheckSwap) Process(ctx context.Context) error {
 		fmt.Printf("  Минус: %.4f%%\n", -res.profitPercent)
 	}
 
-	// Только связки через BTC, ETH или USDC. Базы берём из тикеров (как для ATOM), не из БД.
-	allowedHubs := map[string]bool{"BTC": true, "ETH": true, "USDC": true}
-	type chainProfit struct {
-		baseA, baseB string
-		profit       float64
-	}
-	baseAssets := make([]string, 0)
-	for symbol := range priceMap {
-		if strings.HasSuffix(symbol, "USDT") && len(symbol) > 4 {
-			base := symbol[:len(symbol)-4]
-			baseAssets = append(baseAssets, base)
-		}
-	}
-	sort.Strings(baseAssets)
-	var allChains []chainProfit
-	for i := 0; i < len(baseAssets); i++ {
-		for j := 0; j < len(baseAssets); j++ {
-			if i == j {
-				continue
-			}
-			baseA, baseB := baseAssets[i], baseAssets[j]
-			if !allowedHubs[baseA] && !allowedHubs[baseB] {
-				continue
-			}
-			coinA := mexc.SymbolDetail{BaseAsset: baseA, Symbol: baseA + "USDT", QuoteAsset: "USDT"}
-			coinB := mexc.SymbolDetail{BaseAsset: baseB, Symbol: baseB + "USDT", QuoteAsset: "USDT"}
-			res, ok := u.calcChainProfit(priceMap, &coinA, &coinB)
-			if !ok {
-				continue
-			}
-			allChains = append(allChains, chainProfit{baseA, baseB, res.profitPercent})
-		}
-	}
-	sort.Slice(allChains, func(i, j int) bool { return allChains[i].profit > allChains[j].profit })
-
-	// Все цепочки с прибылью (те же данные, что и топ-5)
+	// Все цепочки с прибылью (allChains уже посчитаны выше)
 	fmt.Printf("\n--- Все цепочки с прибылью (USDT -> A -> B -> USDT, через BTC/ETH/USDC) ---\n")
 	var profitable int
 	for _, c := range allChains {
