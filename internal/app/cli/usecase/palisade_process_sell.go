@@ -221,8 +221,11 @@ func (u *PalisadeProcessSell) Process(ctx context.Context) error {
 		// Время открытия ордера из базы данных
 		timeSinceOpen := time.Since(dbOrder.OpenDate)
 
+		// Нижняя граница -1.5%: считаем выход за диапазон вниз только когда цена ниже этой отметки
+		downLevelMinus15 := dbOrder.DownLevel * 0.985
+
 		//Если цена вышла из диапазона
-		if currentPrice.Price > dbOrder.UpLevel || currentPrice.Price < dbOrder.DownLevel || timeSinceOpen > 120*time.Minute {
+		if currentPrice.Price > dbOrder.UpLevel || currentPrice.Price < downLevelMinus15 || timeSinceOpen > 120*time.Minute {
 			if currentPrice.Price > dbOrder.UpLevel {
 				msg = fmt.Sprintf(
 					"Текущая цена вышла за диапазон вверх\nТекущая цена: %.8f\nВерхняя цена (UpLevel): %.8f",
@@ -230,23 +233,23 @@ func (u *PalisadeProcessSell) Process(ctx context.Context) error {
 					dbOrder.UpLevel,
 				)
 			}
-			if currentPrice.Price < dbOrder.DownLevel {
+			if currentPrice.Price < downLevelMinus15 {
 				msg = fmt.Sprintf(
-					"Текущая цена вышла за диапазон вниз\nТекущая цена: %.8f\nНижняя цена (DownLevel): %.8f",
+					"Текущая цена вышла за диапазон вниз\nТекущая цена: %.8f\nНижняя граница -1.5%%: %.8f",
 					currentPrice.Price,
-					dbOrder.DownLevel,
+					downLevelMinus15,
 				)
 			}
 			if timeSinceOpen > 120*time.Minute {
 				msg = fmt.Sprintf(
-					"Прошло больше 2х часов с момента открытия оредра \nТекущая цена: %.8f\nНижняя цена (DownLevel): %.8f",
+					"Прошло больше 2х часов с момента открытия оредра \nТекущая цена: %.8f\nНижняя граница -1.5%%: %.8f",
 					currentPrice.Price,
-					dbOrder.DownLevel,
+					downLevelMinus15,
 				)
 			}
 
-			// Если текущая цена меньше цены покупки ордера и не вышла за уровень вниз, прекращаем выполнение
-			if currentPrice.Price < dbOrder.BuyPrice && currentPrice.Price > dbOrder.DownLevel {
+			// Если текущая цена меньше цены покупки ордера и не вышла за уровень вниз (-1.5%%), прекращаем выполнение
+			if currentPrice.Price < dbOrder.BuyPrice && currentPrice.Price > downLevelMinus15 {
 				fmt.Printf("⚠️  Текущая цена (%.8f) меньше цены покупки ордера (%.8f), прекращаем выполнение\n",
 					currentPrice.Price, dbOrder.BuyPrice)
 				return nil
