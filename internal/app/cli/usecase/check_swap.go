@@ -290,6 +290,7 @@ type chainResult struct {
 
 // calcChainProfitWithDebug считает цепочку и возвращает дебаг-строки по каждому шагу проверки.
 // Для пары с USDT используем BaseAsset+"USDT" (как в тикерах биржи).
+//
 //nolint:unused
 func (u *CheckSwap) calcChainProfitWithDebug(priceMap map[string]float64, coinA, coinB *mexc.SymbolDetail) (chainResult, bool, []string) {
     var res chainResult

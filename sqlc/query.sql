@@ -93,8 +93,8 @@ WHERE
     --AND volatility > 0.1
     --AND volatility < 0.4
     AND quoteasset = 'USDT'
-    --AND symbol = 'TPTUUSDT'
-    AND symbol = 'LTCUSDT'
+    AND symbol = 'TPTUUSDT'
+    --AND symbol = 'LTCUSDT'
 ORDER BY lastcheck DESC
 LIMIT $1
 OFFSET $2;
