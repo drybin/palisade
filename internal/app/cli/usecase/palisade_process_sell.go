@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/drybin/palisade/internal/adapter/webapi"
@@ -226,27 +227,25 @@ func (u *PalisadeProcessSell) Process(ctx context.Context) error {
 
 		//Если цена вышла из диапазона
 		if currentPrice.Price > dbOrder.UpLevel || currentPrice.Price < downLevelMinus15 || timeSinceOpen > 120*time.Minute {
+			var reasons []string
 			if currentPrice.Price > dbOrder.UpLevel {
-				msg = fmt.Sprintf(
-					"Текущая цена вышла за диапазон вверх\nТекущая цена: %.8f\nВерхняя цена (UpLevel): %.8f",
+				reasons = append(reasons, fmt.Sprintf(
+					"Текущая цена вышла за диапазон вверх (%.8f > %.8f)",
 					currentPrice.Price,
 					dbOrder.UpLevel,
-				)
+				))
 			}
 			if currentPrice.Price < downLevelMinus15 {
-				msg = fmt.Sprintf(
-					"Текущая цена вышла за диапазон вниз\nТекущая цена: %.8f\nНижняя граница -1.5%%: %.8f",
+				reasons = append(reasons, fmt.Sprintf(
+					"Текущая цена вышла за диапазон вниз (%.8f < %.8f)",
 					currentPrice.Price,
 					downLevelMinus15,
-				)
+				))
 			}
 			if timeSinceOpen > 120*time.Minute {
-				msg = fmt.Sprintf(
-					"Прошло больше 2х часов с момента открытия оредра \nТекущая цена: %.8f\nНижняя граница -1.5%%: %.8f",
-					currentPrice.Price,
-					downLevelMinus15,
-				)
+				reasons = append(reasons, "Прошло больше 2 часов с момента открытия ордера")
 			}
+			msg = strings.Join(reasons, "\n")
 
 			// Если текущая цена меньше цены покупки ордера и не вышла за уровень вниз (-1.5%%), прекращаем выполнение
 			if currentPrice.Price < dbOrder.BuyPrice && currentPrice.Price > downLevelMinus15 {
