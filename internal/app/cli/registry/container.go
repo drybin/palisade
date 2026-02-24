@@ -28,6 +28,7 @@ type Usecases struct {
 	PalisadeProcess       *usecase.PalisadeProcess
 	PalisadeProcessMulti  *usecase.PalisadeProcessMulti
 	PalisadeProcessSell   *usecase.PalisadeProcessSell
+	SwapProcess           *usecase.SwapProcess
 	GetCoinList           *usecase.GetCoinList
 	CheckPalisadeCoinList *usecase.CheckPalisadeCoinList
 	CheckPalisadeCoin     *usecase.CheckPalisadeCoin
@@ -87,6 +88,7 @@ func NewContainer(
 			stateRepo,
 		),
 		PalisadeProcessSell:   usecase.NewPalisadeProcessSellUsecase(mexcApi, stateRepo, telegramApi),
+		SwapProcess:           usecase.NewSwapProcessUsecase(mexcApi, stateRepo),
 		GetCoinList:           usecase.NewGetCoinListUsecase(mexcApi, stateRepo),
 		CheckPalisadeCoinList: usecase.NewCheckPalisadeCoinListUsecase(palisadeCheckerService, stateRepo),
 		CheckPalisadeCoin:     usecase.NewCheckPalisadeCoinUsecase(palisadeCheckerService, stateRepo),

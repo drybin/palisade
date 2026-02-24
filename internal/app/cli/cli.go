@@ -33,6 +33,7 @@ func Run(config *config.Config) error {
 		command.NewPalisadeProcessCommand(cnt.Usecases.PalisadeProcess),
 		command.NewPalisadeProcessMultiCommand(cnt.Usecases.PalisadeProcessMulti),
 		command.NewPalisadeProcessSellCommand(cnt.Usecases.PalisadeProcessSell),
+		command.NewSwapProcessCommand(cnt.Usecases.SwapProcess),
 		command.NewGetCoinListCommand(cnt.Usecases.GetCoinList),
 		command.NewCheckPalisadeCoinListCommand(cnt.Usecases.CheckPalisadeCoinList),
 		command.NewCheckPalisadeCoinCommand(cnt.Usecases.CheckPalisadeCoin),
