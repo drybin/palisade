@@ -56,7 +56,7 @@ func (u *GetCoinList) Process(ctx context.Context, debug bool) error {
 		if err != nil {
 			return wrap.Errorf("failed get symbol details from db: %w", err)
 		}
-		if symbolFromDb != nil {
+		if symbolFromDb != nil && symbolFromDb.IsSpotTradingAllowed == true {
 			// fmt.Println("Symbol found in db, continue")
 			continue
 		}
