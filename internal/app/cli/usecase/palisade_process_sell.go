@@ -254,6 +254,16 @@ func (u *PalisadeProcessSell) Process(ctx context.Context) error {
 				return nil
 			}
 
+			// Если единственный триггер — время (цена в диапазоне), не продавать в минус
+			timeOnlyTrigger := timeSinceOpen > 120*time.Minute &&
+				currentPrice.Price <= dbOrder.UpLevel &&
+				currentPrice.Price >= downLevelMinus15
+			if timeOnlyTrigger && currentPrice.Price < dbOrder.BuyPrice {
+				fmt.Printf("⚠️  Триггер только по времени: текущая цена (%.8f) меньше цены покупки (%.8f), не продаём в минус\n",
+					currentPrice.Price, dbOrder.BuyPrice)
+				return nil
+			}
+
 			// Отменяем текущий лимитный ордер на продажу перед размещением маркет-ордера
 			fmt.Printf("\n--- Отменяем текущий ордер на продажу ---\n")
 			fmt.Printf("OrderID: %s\n", orderID)
