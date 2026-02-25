@@ -2,7 +2,6 @@ package registry
 
 import (
 	"context"
-	"os/exec"
 
 	"mexc-sdk/mexcsdk"
 
@@ -61,49 +60,49 @@ func NewContainer(
 	}
 
 	stateRepo := registry.NewStateRepository(db)
-	
+
 	// Создаем сервисы
 	palisadeCheckerService := service.NewPalisadeCheckerService(mexcApi, stateRepo)
-	
+
 	container := Container{
 		Usecases: &Usecases{
 			HelloWorld: usecase.NewHelloWorldUsecase(),
 			CheckSwap:  usecase.NewCheckSwapUsecase(mexcApi, stateRepo),
 			PalisadeProcess: usecase.NewPalisadeProcessUsecase(
-			mexcApi,
-			mexcV2Api,
-			telegramApi,
-			service.NewTradingPair(),
-			service.NewPalisadeLevels(mexcApi, mexcV2Api),
-			service.NewByuService(mexcApi, mexcV2Api, stateRepo),
-			palisadeCheckerService,
-			stateRepo,
-		),
-		PalisadeProcessMulti: usecase.NewPalisadeProcessMultiUsecase(
-			mexcApi,
-			mexcV2Api,
-			telegramApi,
-			service.NewTradingPair(),
-			service.NewPalisadeLevels(mexcApi, mexcV2Api),
-			service.NewByuService(mexcApi, mexcV2Api, stateRepo),
-			palisadeCheckerService,
-			stateRepo,
-		),
-		PalisadeProcessSell:   usecase.NewPalisadeProcessSellUsecase(mexcApi, stateRepo, telegramApi),
-		SwapProcess:           usecase.NewSwapProcessUsecase(mexcApi, stateRepo),
-		GetCoinList:           usecase.NewGetCoinListUsecase(mexcApi, stateRepo),
-		CheckPalisadeCoinList: usecase.NewCheckPalisadeCoinListUsecase(palisadeCheckerService, stateRepo),
-		CheckPalisadeCoin:     usecase.NewCheckPalisadeCoinUsecase(palisadeCheckerService, stateRepo),
+				mexcApi,
+				mexcV2Api,
+				telegramApi,
+				service.NewTradingPair(),
+				service.NewPalisadeLevels(mexcApi, mexcV2Api),
+				service.NewByuService(mexcApi, mexcV2Api, stateRepo),
+				palisadeCheckerService,
+				stateRepo,
+			),
+			PalisadeProcessMulti: usecase.NewPalisadeProcessMultiUsecase(
+				mexcApi,
+				mexcV2Api,
+				telegramApi,
+				service.NewTradingPair(),
+				service.NewPalisadeLevels(mexcApi, mexcV2Api),
+				service.NewByuService(mexcApi, mexcV2Api, stateRepo),
+				palisadeCheckerService,
+				stateRepo,
+			),
+			PalisadeProcessSell:   usecase.NewPalisadeProcessSellUsecase(mexcApi, stateRepo, telegramApi),
+			SwapProcess:           usecase.NewSwapProcessUsecase(mexcApi, stateRepo),
+			GetCoinList:           usecase.NewGetCoinListUsecase(mexcApi, stateRepo),
+			CheckPalisadeCoinList: usecase.NewCheckPalisadeCoinListUsecase(palisadeCheckerService, stateRepo),
+			CheckPalisadeCoin:     usecase.NewCheckPalisadeCoinUsecase(palisadeCheckerService, stateRepo),
 		},
 		MexcSpot: mexcSpot,
 		Clean: func() {
-			// SDK не предоставляет API shutdown — останавливаем Node/jsii процессы вручную,
-			// чтобы избежать зависших jsii-kernel и sync-rpc workers.
-			killPatterns := []string{"jsii-kernel", "jsii-runtime", "sync-rpc"}
-			for _, pattern := range killPatterns {
-				cmd := exec.Command("pkill", "-f", pattern)
-				_ = cmd.Run() // игнорируем: pkill=1 если нет совпадений (норма при чистом выходе)
-			}
+			// // SDK не предоставляет API shutdown — останавливаем Node/jsii процессы вручную,
+			// // чтобы избежать зависших jsii-kernel и sync-rpc workers.
+			// killPatterns := []string{"jsii-kernel", "jsii-runtime", "sync-rpc"}
+			// for _, pattern := range killPatterns {
+			// 	cmd := exec.Command("pkill", "-f", pattern)
+			// 	_ = cmd.Run() // игнорируем: pkill=1 если нет совпадений (норма при чистом выходе)
+			// }
 		},
 	}
 
