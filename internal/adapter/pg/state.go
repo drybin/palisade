@@ -305,6 +305,9 @@ func (u StateRepository) GetNextTradeId(ctx context.Context) (int, error) {
 		maxId = parsed
 	}
 
+	if maxId < 200 {
+		maxId = 200
+	}
 	// Возвращаем +1 от максимального ID
 	return maxId + 1, nil
 }
