@@ -23,6 +23,7 @@ func Run(config *config.Config) error {
 	if err != nil {
 		log.Fatal("failed to create cli container", err)
 	}
+	defer cnt.Clean()
 
 	app := cliV2.NewApp()
 	app.Name = config.ServiceName

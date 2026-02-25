@@ -2,6 +2,8 @@ package registry
 
 import (
 	"context"
+	"os/exec"
+
 	"mexc-sdk/mexcsdk"
 
 	registry "github.com/drybin/palisade/internal/adapter/pg"
@@ -95,6 +97,13 @@ func NewContainer(
 		},
 		MexcSpot: mexcSpot,
 		Clean: func() {
+			// SDK не предоставляет API shutdown — останавливаем Node/jsii процессы вручную,
+			// чтобы избежать зависших jsii-kernel и sync-rpc workers.
+			killPatterns := []string{"jsii-kernel", "jsii-runtime", "sync-rpc"}
+			for _, pattern := range killPatterns {
+				cmd := exec.Command("pkill", "-f", pattern)
+				_ = cmd.Run() // игнорируем: pkill=1 если нет совпадений (норма при чистом выходе)
+			}
 		},
 	}
 
