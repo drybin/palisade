@@ -258,7 +258,7 @@ func (u *PalisadeProcessSell) Process(ctx context.Context) error {
 			timeOnlyTrigger := timeSinceOpen > 120*time.Minute &&
 				currentPrice.Price <= dbOrder.UpLevel &&
 				currentPrice.Price >= downLevelMinus15
-			if timeOnlyTrigger && currentPrice.Price < dbOrder.BuyPrice {
+			if timeOnlyTrigger && currentPrice.Price <= dbOrder.BuyPrice {
 				fmt.Printf("⚠️  Триггер только по времени: текущая цена (%.8f) меньше цены покупки (%.8f), не продаём в минус\n",
 					currentPrice.Price, dbOrder.BuyPrice)
 				return nil
