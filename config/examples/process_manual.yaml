@@ -1,0 +1,6 @@
+# go run ./cmd/cli/main.go process-manual --config config/examples/process_manual.yaml
+symbol: BTCUSDT
+support: 65000.0
+resistance: 66500.0
+# quote_usdt: 2
+# skip_price_range_check: false

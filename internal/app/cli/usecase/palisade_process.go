@@ -249,18 +249,7 @@ func (u *PalisadeProcess) Process(ctx context.Context) error {
 
 	totalBalance := usdtBalance.Free + usdtBalance.Locked
 	message := fmt.Sprintf(
-		"<b>📊 Новый ордер размещен</b>\n\n"+
-			"<b>Монета:</b> %s\n"+
-			"<b>Нижняя граница (Support):</b> %.8f\n"+
-			"<b>Верхняя граница (Resistance):</b> %.8f\n\n"+
-			"<b>Ордер:</b>\n"+
-			"  ID: %s\n"+
-			"  Цена: %.8f\n"+
-			"  Количество: %.8f\n"+
-			"  Сумма: %.2f USDT\n\n"+
-			"<b>Баланс на бирже:</b> %.2f USDT\n"+
-			"  Свободно: %.2f USDT\n"+
-			"  Заблокировано: %.2f USDT",
+		"<b>📥 Покупка</b> %s · S %.8f · R %.8f · ордер <code>%s</code> · цена %.8f · кол-во %.8f · ~%.2f USDT · баланс %.2f USDT (своб %.2f · блок %.2f)",
 		coin.Symbol,
 		coin.Support,
 		coin.Resistance,

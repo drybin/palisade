@@ -32,6 +32,15 @@ type IStateRepository interface {
 	UpdateSellOrderIdTradeLog(context.Context, int, string) error
 	UpdateSuccesTradeLog(context.Context, int, time.Time, float64, float64) error
 	GetOpenOrders(context.Context) ([]TradeLog, error)
+
+	SaveTradeLogManual(context.Context, SaveTradeLogParams) (*TradeLog, error)
+	GetOpenOrdersManual(context.Context) ([]TradeLog, error)
+	GetTradeLogManualById(context.Context, int) (*TradeLog, error)
+	GetNextTradeIdManual(context.Context) (int, error)
+	UpdateDealDateTradeLogManual(context.Context, int, time.Time) error
+	UpdateCancelDateTradeLogManual(context.Context, int, time.Time) error
+	UpdateSellOrderIdTradeLogManual(context.Context, int, string) error
+	UpdateSuccesTradeLogManual(context.Context, int, time.Time, float64, float64) error
 }
 
 type SaveTradeLogParams struct {

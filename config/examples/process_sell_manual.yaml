@@ -1,0 +1,3 @@
+# Только если открыто несколько строк в trade_log_manual:
+# go run ./cmd/cli/main.go process-sell-manual --config config/examples/process_sell_manual.yaml
+trade_log_manual_id: 1

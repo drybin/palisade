@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -15,6 +16,7 @@ import (
 	"github.com/drybin/palisade/internal/domain/model/mexc"
 	"github.com/drybin/palisade/internal/domain/repo"
 	"github.com/drybin/palisade/pkg/wrap"
+	"gopkg.in/yaml.v3"
 )
 
 type IPalisadeProcessSell interface {
@@ -22,9 +24,11 @@ type IPalisadeProcessSell interface {
 }
 
 type PalisadeProcessSell struct {
-	repo        *webapi.MexcWebapi
-	stateRepo   repo.IStateRepository
-	telegramApi *webapi.TelegramWebapi
+	repo           *webapi.MexcWebapi
+	stateRepo      repo.IStateRepository
+	telegramApi    *webapi.TelegramWebapi
+	useManualLog   bool
+	sellConfigPath string
 }
 
 func NewPalisadeProcessSellUsecase(
@@ -36,35 +40,136 @@ func NewPalisadeProcessSellUsecase(
 		repo:        repo,
 		stateRepo:   stateRepo,
 		telegramApi: telegramApi,
+		useManualLog: false,
 	}
 }
 
+// NewPalisadeProcessSellManualUsecase — process-sell-manual (таблица trade_log_manual).
+func NewPalisadeProcessSellManualUsecase(
+	repo *webapi.MexcWebapi,
+	stateRepo repo.IStateRepository,
+	telegramApi *webapi.TelegramWebapi,
+) *PalisadeProcessSell {
+	return &PalisadeProcessSell{
+		repo:         repo,
+		stateRepo:    stateRepo,
+		telegramApi:  telegramApi,
+		useManualLog: true,
+	}
+}
+
+func (u *PalisadeProcessSell) SetSellManualConfigPath(path string) {
+	u.sellConfigPath = path
+}
+
+func (u *PalisadeProcessSell) clientOrderPrefix() string {
+	if u.useManualLog {
+		return "Manual"
+	}
+	return "Prod"
+}
+
+func (u *PalisadeProcessSell) persistCancel(ctx context.Context, id int, t time.Time) error {
+	if u.useManualLog {
+		return u.stateRepo.UpdateCancelDateTradeLogManual(ctx, id, t)
+	}
+	return u.stateRepo.UpdateCancelDateTradeLog(ctx, id, t)
+}
+
+func (u *PalisadeProcessSell) persistSuccess(ctx context.Context, id int, closeTime time.Time, closeBalance, sellPrice float64) error {
+	if u.useManualLog {
+		return u.stateRepo.UpdateSuccesTradeLogManual(ctx, id, closeTime, closeBalance, sellPrice)
+	}
+	return u.stateRepo.UpdateSuccesTradeLog(ctx, id, closeTime, closeBalance, sellPrice)
+}
+
+func (u *PalisadeProcessSell) nextTradeClientID(ctx context.Context) (int, error) {
+	if u.useManualLog {
+		return u.stateRepo.GetNextTradeIdManual(ctx)
+	}
+	return u.stateRepo.GetNextTradeId(ctx)
+}
+
+func (u *PalisadeProcessSell) persistSellOrderID(ctx context.Context, id int, sellID string) error {
+	if u.useManualLog {
+		return u.stateRepo.UpdateSellOrderIdTradeLogManual(ctx, id, sellID)
+	}
+	return u.stateRepo.UpdateSellOrderIdTradeLog(ctx, id, sellID)
+}
+
+func (u *PalisadeProcessSell) persistDealDate(ctx context.Context, id int, dealTime time.Time) error {
+	if u.useManualLog {
+		return u.stateRepo.UpdateDealDateTradeLogManual(ctx, id, dealTime)
+	}
+	return u.stateRepo.UpdateDealDateTradeLog(ctx, id, dealTime)
+}
+
 func (u *PalisadeProcessSell) Process(ctx context.Context) error {
-	fmt.Println("=== Palisade Process Sell ===")
-
-	// Получаем открытые ордера из базы данных
-	dbOrders, err := u.stateRepo.GetOpenOrders(ctx)
-	if err != nil {
-		return wrap.Errorf("failed to get open orders from database: %w", err)
+	if u.useManualLog {
+		fmt.Println("=== Palisade Process Sell (manual / trade_log_manual) ===")
+	} else {
+		fmt.Println("=== Palisade Process Sell ===")
 	}
 
-	if len(dbOrders) == 0 {
-		fmt.Println("Нет открытых ордеров в базе данных")
-		return nil
+	var dbOrders []repo.TradeLog
+	var err error
+	if u.useManualLog {
+		var dbOrder *repo.TradeLog
+		if u.sellConfigPath != "" {
+			b, rerr := os.ReadFile(u.sellConfigPath)
+			if rerr != nil {
+				return wrap.Errorf("read sell config %s: %w", u.sellConfigPath, rerr)
+			}
+			var y struct {
+				TradeLogManualID *int `yaml:"trade_log_manual_id"`
+			}
+			if uerr := yaml.Unmarshal(b, &y); uerr != nil {
+				return wrap.Errorf("yaml %s: %w", u.sellConfigPath, uerr)
+			}
+			if y.TradeLogManualID != nil {
+				dbOrder, err = u.stateRepo.GetTradeLogManualById(ctx, *y.TradeLogManualID)
+				if err != nil {
+					return err
+				}
+				if dbOrder.CloseDate != nil || dbOrder.CancelDate != nil {
+					return wrap.Errorf("trade_log_manual id %d уже закрыт или отменён", dbOrder.ID)
+				}
+			}
+		}
+		if dbOrder == nil {
+			open, gerr := u.stateRepo.GetOpenOrdersManual(ctx)
+			if gerr != nil {
+				return gerr
+			}
+			if len(open) == 0 {
+				fmt.Println("Нет открытых записей в trade_log_manual")
+				return nil
+			}
+			if len(open) > 1 {
+				return wrap.Errorf("открыто %d manual-сделок: укажите trade_log_manual_id в YAML (--config)", len(open))
+			}
+			dbOrder = &open[0]
+		}
+		dbOrders = []repo.TradeLog{*dbOrder}
+	} else {
+		dbOrders, err = u.stateRepo.GetOpenOrders(ctx)
+		if err != nil {
+			return wrap.Errorf("failed to get open orders from database: %w", err)
+		}
+		if len(dbOrders) == 0 {
+			fmt.Println("Нет открытых ордеров в базе данных")
+			return nil
+		}
 	}
 
-	// if len(dbOrders) > 1 {
-	// 	fmt.Printf("Найдено открытых ордеров в базе данных: %d\n", len(dbOrders))
-	// 	fmt.Println("Прекращаем работу, так как открытых ордеров больше 1")
-	// 	return nil
-	// }
-
-	// Проверяем статус только если ордер один
 	dbOrder := dbOrders[0]
-	fmt.Printf("\nНайден открытый ордер в базе данных\n\n")
-
-	fmt.Printf("--- Ордер ---\n")
-	fmt.Printf("ID в БД: %d\n", dbOrder.ID)
+	if u.useManualLog {
+		fmt.Printf("\n--- trade_log_manual id=%d ---\n\n", dbOrder.ID)
+	} else {
+		fmt.Printf("\nНайден открытый ордер в базе данных\n\n")
+		fmt.Printf("--- Ордер ---\n")
+		fmt.Printf("ID в БД: %d\n", dbOrder.ID)
+	}
 	fmt.Printf("Символ: %s\n", dbOrder.Symbol)
 	fmt.Printf("OrderId (биржи): %s\n", dbOrder.OrderId)
 	fmt.Printf("Цена покупки: %.8f\n", dbOrder.BuyPrice)
@@ -88,7 +193,7 @@ func (u *PalisadeProcessSell) Process(ctx context.Context) error {
 		fmt.Printf("Проверяем статус ордера на покупку (BUY): %s\n", orderID)
 	}
 
-	queryResult, err := u.repo.GetOrderQuery(dbOrders[0].Symbol, orderID)
+	queryResult, err := u.repo.GetOrderQuery(dbOrder.Symbol, orderID)
 	if err != nil {
 		return wrap.Errorf("ошибка при получении ордера с биржи для %s: %w", dbOrder.Symbol, err)
 	}
@@ -100,7 +205,7 @@ func (u *PalisadeProcessSell) Process(ctx context.Context) error {
 		// Обновляем cancel_date в базе данных (в часовом поясе GMT+7)
 		cancelTime := helpers.NowGMT7()
 		fmt.Printf("   Сохраняем cancel_date: %s (часовой пояс: %s)\n", cancelTime.Format("2006-01-02 15:04:05 MST"), cancelTime.Location().String())
-		err = u.stateRepo.UpdateCancelDateTradeLog(ctx, dbOrder.ID, cancelTime)
+		err = u.persistCancel(ctx, dbOrder.ID, cancelTime)
 		if err != nil {
 			return wrap.Errorf("failed to update cancel date for trade log id %d: %w", dbOrder.ID, err)
 		}
@@ -108,16 +213,7 @@ func (u *PalisadeProcessSell) Process(ctx context.Context) error {
 
 		// Отправляем сообщение в Telegram
 		message := fmt.Sprintf(
-			"<b>⚠️ Ордер не найден на бирже</b>\n\n"+
-				"<b>Параметры ордера:</b>\n"+
-				"  Символ: %s\n"+
-				"  OrderID: %s\n"+
-				"  Цена покупки: %.8f\n"+
-				"  Количество: %.8f\n"+
-				"  Дата открытия: %s\n\n"+
-				"<b>Время:</b> %s\n"+
-				"<b>Причина:</b> Ордер не найден среди открытых ордеров на бирже (возможно, уже исполнен или отменен)\n"+
-				"<b>Действие:</b> Ордер помечен как отмененный в базе данных",
+			"<b>⚠️ Нет на бирже</b> %s · <code>%s</code> · покупка %.8f×%.8f · открыт %s · БД cancel · %s · нет среди открытых (исполнен/отменён?)",
 			dbOrder.Symbol,
 			dbOrder.OrderId,
 			dbOrder.BuyPrice,
@@ -158,40 +254,24 @@ func (u *PalisadeProcessSell) Process(ctx context.Context) error {
 			fmt.Printf("Средняя цена продажи: %.8f\n", sellPrice)
 			fmt.Printf("Итоговая сумма: %.2f USDT\n", closeBalance)
 
-			err = u.stateRepo.UpdateSuccesTradeLog(ctx, dbOrder.ID, closeTime, closeBalance, sellPrice)
+			err = u.persistSuccess(ctx, dbOrder.ID, closeTime, closeBalance, sellPrice)
 			if err != nil {
 				return wrap.Errorf("failed to update success trade log for id %d: %w", dbOrder.ID, err)
 			}
 			fmt.Printf("✅ Обновлен close_date в базе данных\n")
 
 			// Отправляем сообщение в Telegram
-			profit := closeBalance - dbOrder.OpenBalance
-			profitPercent := (profit / dbOrder.OpenBalance) * 100
+			buyCost := dbOrder.BuyPrice * dbOrder.Amount
+			profit := closeBalance - buyCost
+			profitPercent := (profit / buyCost) * 100
 
 			telegramMessage := fmt.Sprintf(
-				"<b>💰 Ордер на продажу завершен</b>\n\n"+
-					"<b>Параметры сделки:</b>\n"+
-					"  Символ: %s\n"+
-					"  OrderID покупки: %s\n"+
-					"  OrderID продажи: %s\n"+
-					"  Статус: %s\n\n"+
-					"<b>Покупка:</b>\n"+
-					"  Цена: %.8f\n"+
-					"  Количество: %.8f\n"+
-					"  Сумма: %.2f USDT\n"+
-					"  Дата: %s\n\n"+
-					"<b>Продажа:</b>\n"+
-					"  Цена: %.8f\n"+
-					"  Количество: %s\n"+
-					"  Сумма: %.2f USDT\n"+
-					"  Дата: %s\n\n"+
-					"<b>Результат:</b>\n"+
-					"  Прибыль: %.2f USDT (%.2f%%)\n"+
-					"<b>Время:</b> %s",
+				"<b>💰 Продажа завершена</b> %s · P/L %+.2f USDT (%+.2f%%) · buy <code>%s</code> sell <code>%s</code> · покупка %.8f×%.8f · баланс на откр %.2f USDT (%s) · продажа %.8f×%s = %.2f USDT (%s) · статус %s · %s",
 				dbOrder.Symbol,
+				profit,
+				profitPercent,
 				dbOrder.OrderId,
 				queryResult.OrderID,
-				queryResult.Status,
 				dbOrder.BuyPrice,
 				dbOrder.Amount,
 				dbOrder.OpenBalance,
@@ -200,8 +280,7 @@ func (u *PalisadeProcessSell) Process(ctx context.Context) error {
 				queryResult.ExecutedQty,
 				closeBalance,
 				closeTime.Format("2006-01-02 15:04:05"),
-				profit,
-				profitPercent,
+				queryResult.Status,
 				closeTime.Format("2006-01-02 15:04:05 MST"),
 			)
 			_, err = u.telegramApi.Send(telegramMessage)
@@ -285,11 +364,11 @@ func (u *PalisadeProcessSell) Process(ctx context.Context) error {
 			fmt.Println("⏳ Ожидание 10 секунд перед размещением маркет-ордера...")
 			time.Sleep(10 * time.Second)
 
-			nextOrderId, err := u.stateRepo.GetNextTradeId(ctx)
+			nextOrderId, err := u.nextTradeClientID(ctx)
 			if err != nil {
 				return wrap.Errorf("failed to get next trade id: %w", err)
 			}
-			clientOrderId := fmt.Sprintf("Prod_order_sell_market_%d", nextOrderId)
+			clientOrderId := fmt.Sprintf("%s_order_sell_market_%d", u.clientOrderPrefix(), nextOrderId)
 
 			// Получить информацию о символе для правильного округления количества
 			symbolInfo, err := u.repo.GetSymbolInfo(ctx, dbOrder.Symbol)
@@ -358,37 +437,24 @@ func (u *PalisadeProcessSell) Process(ctx context.Context) error {
 			fmt.Printf("Причина: %s\n", msg)
 
 			// Сохраняем новый orderId_sell для маркет-ордера
-			err = u.stateRepo.UpdateSellOrderIdTradeLog(ctx, dbOrder.ID, placeOrderResult.OrderID)
+			err = u.persistSellOrderID(ctx, dbOrder.ID, placeOrderResult.OrderID)
 			if err != nil {
 				return wrap.Errorf("failed to save sell order id: %w", err)
 			}
 
 			// Отправляем сообщение в Telegram
 			marketOrderTime := helpers.NowGMT7()
+			reasonOneLine := strings.ReplaceAll(strings.ReplaceAll(msg, "\n", " · "), "  ", " ")
 			telegramMessage := fmt.Sprintf(
-				"<b>🚨 Маркет-ордер на продажу размещен</b>\n\n"+
-					"<b>Параметры ордера на покупку:</b>\n"+
-					"  Символ: %s\n"+
-					"  OrderID покупки: %s\n"+
-					"  Цена покупки: %.8f\n"+
-					"  Количество: %.8f\n"+
-					"  Дата открытия: %s\n\n"+
-					"<b>Маркет-ордер на продажу:</b>\n"+
-					"  OrderID продажи: %s\n"+
-					"  Количество: %.8f\n"+
-					"  Текущая цена: %.8f\n\n"+
-					"<b>Время:</b> %s\n"+
-					"<b>Причина:</b>\n%s",
+				"<b>🚨 Маркет-продажа</b> %s · sell <code>%s</code> · qty %.8f · цена ~%.8f · buy <code>%s</code> · открыт %s · %s · %s",
 				dbOrder.Symbol,
-				dbOrder.OrderId,
-				dbOrder.BuyPrice,
-				dbOrder.Amount,
-				dbOrder.OpenDate.Format("2006-01-02 15:04:05"),
 				placeOrderResult.OrderID,
 				dbOrder.Amount,
 				currentPrice.Price,
+				dbOrder.OrderId,
+				dbOrder.OpenDate.Format("2006-01-02 15:04:05"),
 				marketOrderTime.Format("2006-01-02 15:04:05 MST"),
-				msg,
+				reasonOneLine,
 			)
 			_, err = u.telegramApi.Send(telegramMessage)
 			if err != nil {
@@ -429,7 +495,7 @@ func (u *PalisadeProcessSell) Process(ctx context.Context) error {
 			}
 			fmt.Printf("   ⚠️  Прошло больше 2 часов, помечаем ордер как отмененный\n")
 			cancelTime := helpers.NowGMT7()
-			err = u.stateRepo.UpdateCancelDateTradeLog(ctx, dbOrder.ID, cancelTime)
+			err = u.persistCancel(ctx, dbOrder.ID, cancelTime)
 			if err != nil {
 				return wrap.Errorf("failed to update cancel date for trade log id %d: %w", dbOrder.ID, err)
 			}
@@ -440,27 +506,16 @@ func (u *PalisadeProcessSell) Process(ctx context.Context) error {
 			hours := int(timeSinceOpen.Hours())
 			minutes := int(timeSinceOpen.Minutes()) % 60
 			message := fmt.Sprintf(
-				"<b>⏱️ Ордер отменен по времени</b>\n\n"+
-					"<b>Параметры ордера:</b>\n"+
-					"  Символ: %s\n"+
-					"  OrderID: %s\n"+
-					"  Тип ордера: %s\n"+
-					"  Цена покупки: %.8f\n"+
-					"  Количество: %.8f\n"+
-					"  Дата открытия: %s\n\n"+
-					"<b>Время:</b> %s\n"+
-					"<b>Время с момента открытия:</b> %d часов %d минут\n"+
-					"<b>Причина:</b> Ордер находился в статусе NEW более 2 минут\n"+
-					"<b>Действие:</b> Ордер отменен и помечен как отмененный в базе данных",
+				"<b>⏱️ Покупка отменена по времени</b> %s · <code>%s</code> · %s · %.8f×%.8f · открыт %s · висел %dч %dм · >2ч в NEW · БД cancel · %s",
 				dbOrder.Symbol,
 				dbOrder.OrderId,
 				queryResult.Side,
 				dbOrder.BuyPrice,
 				dbOrder.Amount,
 				dbOrder.OpenDate.Format("2006-01-02 15:04:05"),
-				cancelTime.Format("2006-01-02 15:04:05 MST"),
 				hours,
 				minutes,
+				cancelTime.Format("2006-01-02 15:04:05 MST"),
 			)
 			_, err = u.telegramApi.Send(message)
 			if err != nil {
@@ -473,7 +528,7 @@ func (u *PalisadeProcessSell) Process(ctx context.Context) error {
 	case "CANCELED", "REJECTED", "EXPIRED":
 		fmt.Printf("   ⚠️  Ордер в статусе %s, помечаем как отмененный в базе данных\n", queryResult.Status)
 		cancelTime := helpers.NowGMT7()
-		err = u.stateRepo.UpdateCancelDateTradeLog(ctx, dbOrder.ID, cancelTime)
+		err = u.persistCancel(ctx, dbOrder.ID, cancelTime)
 		if err != nil {
 			fmt.Printf("   ❌ Ошибка при обновлении cancel_date: %v\n", err)
 		} else {
@@ -489,24 +544,15 @@ func (u *PalisadeProcessSell) Process(ctx context.Context) error {
 			reason = "Ордер истек"
 		}
 		message := fmt.Sprintf(
-			"<b>❌ Ордер %s</b>\n\n"+
-				"<b>Параметры ордера:</b>\n"+
-				"  Символ: %s\n"+
-				"  OrderID: %s\n"+
-				"  Цена покупки: %.8f\n"+
-				"  Количество: %.8f\n"+
-				"  Дата открытия: %s\n\n"+
-				"<b>Время:</b> %s\n"+
-				"<b>Причина:</b> %s\n"+
-				"<b>Действие:</b> Ордер помечен как отмененный в базе данных",
+			"<b>❌ Покупка %s</b> %s · <code>%s</code> · %.8f×%.8f · открыт %s · %s · БД cancel · %s",
 			queryResult.Status,
 			dbOrder.Symbol,
 			queryResult.OrderID,
 			dbOrder.BuyPrice,
 			dbOrder.Amount,
 			dbOrder.OpenDate.Format("2006-01-02 15:04:05"),
-			cancelTime.Format("2006-01-02 15:04:05 MST"),
 			reason,
+			cancelTime.Format("2006-01-02 15:04:05 MST"),
 		)
 		_, err = u.telegramApi.Send(message)
 		if err != nil {
@@ -518,16 +564,7 @@ func (u *PalisadeProcessSell) Process(ctx context.Context) error {
 
 		//Отправляем сообщение в Telegram
 		message := fmt.Sprintf(
-			"<b>✅ Ордер полностью исполнен</b>\n\n"+
-				"<b>Параметры ордера:</b>\n"+
-				"  Символ: %s\n"+
-				"  OrderID: %s\n"+
-				"  Цена покупки: %.8f\n"+
-				"  Количество: %.8f\n"+
-				"  Дата открытия: %s\n\n"+
-				"<b>Время:</b> %s\n"+
-				"<b>Причина:</b> Ордер полностью исполнен на бирже\n"+
-				"<b>Действие:</b> Ордер в статусе FILLED",
+			"<b>✅ Покупка FILLED</b> %s · <code>%s</code> · %.8f×%.8f · открыт %s · далее лимит на продажу · %s",
 			dbOrder.Symbol,
 			queryResult.OrderID,
 			dbOrder.BuyPrice,
@@ -544,11 +581,11 @@ func (u *PalisadeProcessSell) Process(ctx context.Context) error {
 		fmt.Printf("Цена: %.8f\n", dbOrder.UpLevel)
 		fmt.Printf("Количество: %.8f\n", dbOrder.Amount)
 
-		nextOrderId, err := u.stateRepo.GetNextTradeId(ctx)
+		nextOrderId, err := u.nextTradeClientID(ctx)
 		if err != nil {
 			return wrap.Errorf("failed to get next trade id: %w", err)
 		}
-		clientOrderId := fmt.Sprintf("Prod_order_sell_%d", nextOrderId)
+		clientOrderId := fmt.Sprintf("%s_order_sell_%d", u.clientOrderPrefix(), nextOrderId)
 
 		placeOrderResult, err := u.repo.NewOrder(
 			model.OrderParams{
@@ -568,13 +605,13 @@ func (u *PalisadeProcessSell) Process(ctx context.Context) error {
 
 		fmt.Printf("\nордер размещен id %s\n", placeOrderResult.OrderID)
 
-		err = u.stateRepo.UpdateSellOrderIdTradeLog(ctx, dbOrder.ID, placeOrderResult.OrderID)
+		err = u.persistSellOrderID(ctx, dbOrder.ID, placeOrderResult.OrderID)
 		if err != nil {
 			return wrap.Errorf("failed to save sell order id: %w", err)
 		}
 
 		dealTime := helpers.NowGMT7()
-		err = u.stateRepo.UpdateDealDateTradeLog(ctx, dbOrder.ID, dealTime)
+		err = u.persistDealDate(ctx, dbOrder.ID, dealTime)
 		if err != nil {
 			return wrap.Errorf("failed to update deal date for trade log id %d: %w", dbOrder.ID, err)
 		}
@@ -582,30 +619,16 @@ func (u *PalisadeProcessSell) Process(ctx context.Context) error {
 		// Отправляем сообщение в Telegram о размещении ордера на продажу
 		sellOrderTime := helpers.NowGMT7()
 		sellMessage := fmt.Sprintf(
-			"<b>💰 Ордер на продажу размещен</b>\n\n"+
-				"<b>Параметры ордера на покупку:</b>\n"+
-				"  Символ: %s\n"+
-				"  OrderID покупки: %s\n"+
-				"  Цена покупки: %.8f\n"+
-				"  Количество: %.8f\n"+
-				"  Дата открытия: %s\n\n"+
-				"<b>Ордер на продажу:</b>\n"+
-				"  OrderID продажи: %s\n"+
-				"  Цена продажи: %.8f\n"+
-				"  Количество: %.8f\n"+
-				"  Сумма: %.2f USDT\n\n"+
-				"<b>Время:</b> %s\n"+
-				"<b>Причина:</b> Ордер на покупку полностью исполнен (FILLED)\n"+
-				"<b>Действие:</b> Размещен ордер на продажу по верхней границе",
+			"<b>💸 Лимит на продажу</b> %s · sell <code>%s</code> @ %.8f · qty %.8f · ~%.2f USDT · buy <code>%s</code> · %.8f×%.8f · открыт %s · %s",
 			dbOrder.Symbol,
-			dbOrder.OrderId,
-			dbOrder.BuyPrice,
-			dbOrder.Amount,
-			dbOrder.OpenDate.Format("2006-01-02 15:04:05"),
 			placeOrderResult.OrderID,
 			dbOrder.UpLevel,
 			dbOrder.Amount,
 			dbOrder.UpLevel*dbOrder.Amount,
+			dbOrder.OrderId,
+			dbOrder.BuyPrice,
+			dbOrder.Amount,
+			dbOrder.OpenDate.Format("2006-01-02 15:04:05"),
 			sellOrderTime.Format("2006-01-02 15:04:05 MST"),
 		)
 		_, err = u.telegramApi.Send(sellMessage)
@@ -619,25 +642,15 @@ func (u *PalisadeProcessSell) Process(ctx context.Context) error {
 
 		// Отправляем сообщение в Telegram
 		message := fmt.Sprintf(
-			"<b>⚠️ Ордер частично отменен</b>\n\n"+
-				"<b>Параметры ордера:</b>\n"+
-				"  Символ: %s\n"+
-				"  OrderID: %s\n"+
-				"  Цена покупки: %.8f\n"+
-				"  Количество: %.8f\n"+
-				"  Дата открытия: %s\n\n"+
-				"<b>Время:</b> %s\n"+
-				"<b>Причина:</b> Ордер частично отменен на бирже\n"+
-				"<b>Действие:</b> Ордер в статусе PARTIALLY_CANCELED\n"+
-				"<b>Исполнено:</b> %s / %s",
+			"<b>⚠️ Частичная отмена покупки</b> %s · <code>%s</code> · %.8f×%.8f · открыт %s · исполнено %s / %s · %s",
 			dbOrder.Symbol,
 			queryResult.OrderID,
 			dbOrder.BuyPrice,
 			dbOrder.Amount,
 			dbOrder.OpenDate.Format("2006-01-02 15:04:05"),
-			updateTime.Format("2006-01-02 15:04:05 MST"),
 			queryResult.ExecutedQty,
 			queryResult.OrigQty,
+			updateTime.Format("2006-01-02 15:04:05 MST"),
 		)
 		_, err = u.telegramApi.Send(message)
 		if err != nil {
@@ -647,23 +660,14 @@ func (u *PalisadeProcessSell) Process(ctx context.Context) error {
 		updateTime := helpers.NowGMT7()
 
 		message := fmt.Sprintf(
-			"<b>⚠️ Ордер в неизвестном статусе</b>\n\n"+
-				"<b>Параметры ордера:</b>\n"+
-				"  Символ: %s\n"+
-				"  OrderID: %s\n"+
-				"  Цена покупки: %.8f\n"+
-				"  Количество: %.8f\n"+
-				"  Дата открытия: %s\n\n"+
-				"<b>Время:</b> %s\n"+
-				"<b>Причина:</b> Ордер с неизвестным статусом (%s)\n"+
-				"<b>Действие:</b> Ордер помечен как отмененный в базе данных",
+			"<b>⚠️ Неизвестный статус покупки</b> %s · <code>%s</code> · биржа status=%s · %.8f×%.8f · открыт %s · БД cancel · %s",
 			dbOrder.Symbol,
 			dbOrder.OrderId,
+			queryResult.Status,
 			dbOrder.BuyPrice,
 			dbOrder.Amount,
 			dbOrder.OpenDate.Format("2006-01-02 15:04:05"),
 			updateTime.Format("2006-01-02 15:04:05 MST"),
-			queryResult.Status,
 		)
 		_, err = u.telegramApi.Send(message)
 		if err != nil {

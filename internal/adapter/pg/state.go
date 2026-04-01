@@ -444,6 +444,143 @@ func mapTradeLogToDomainModel(t palisade_database.TradeLog) *repo.TradeLog {
 	}
 }
 
+func mapTradeLogManualToDomainModel(t palisade_database.TradeLogManual) *repo.TradeLog {
+	closeBalance := 0.0
+	if t.CloseBalance != nil {
+		closeBalance = *t.CloseBalance
+	}
+	sellPrice := 0.0
+	if t.SellPrice != nil {
+		sellPrice = *t.SellPrice
+	}
+	orderIdSell := ""
+	if t.OrderidSell != nil {
+		orderIdSell = *t.OrderidSell
+	}
+	return &repo.TradeLog{
+		ID:           t.ID,
+		OpenDate:     t.OpenDate,
+		DealDate:     t.DealDate,
+		CloseDate:    t.CloseDate,
+		CancelDate:   t.CancelDate,
+		OpenBalance:  t.OpenBalance,
+		CloseBalance: closeBalance,
+		Symbol:       t.Symbol,
+		BuyPrice:     t.BuyPrice,
+		SellPrice:    sellPrice,
+		Amount:       t.Amount,
+		OrderId:      t.Orderid,
+		OrderId_sell: orderIdSell,
+		UpLevel:      t.Uplevel,
+		DownLevel:    t.Downlevel,
+	}
+}
+
+func (u StateRepository) SaveTradeLogManual(ctx context.Context, params repo.SaveTradeLogParams) (*repo.TradeLog, error) {
+	db := palisade_database.New(u.Postgree)
+	tradeLog, err := db.SaveTradeLogManual(ctx, palisade_database.SaveTradeLogManualParams{
+		OpenDate:    params.OpenDate,
+		OpenBalance: params.OpenBalance,
+		Symbol:      params.Symbol,
+		BuyPrice:    params.BuyPrice,
+		Amount:      params.Amount,
+		Orderid:     params.OrderId,
+		Uplevel:     params.UpLevel,
+		Downlevel:   params.DownLevel,
+	})
+	if err != nil {
+		return nil, wrap.Errorf("failed to save manual trade log: %w", err)
+	}
+	return mapTradeLogManualToDomainModel(tradeLog), nil
+}
+
+func (u StateRepository) GetOpenOrdersManual(ctx context.Context) ([]repo.TradeLog, error) {
+	db := palisade_database.New(u.Postgree)
+	tradeLogs, err := db.GetOpenOrdersManual(ctx)
+	if err != nil {
+		return nil, wrap.Errorf("failed to get open manual orders: %w", err)
+	}
+	result := make([]repo.TradeLog, 0, len(tradeLogs))
+	for _, tl := range tradeLogs {
+		result = append(result, *mapTradeLogManualToDomainModel(tl))
+	}
+	return result, nil
+}
+
+func (u StateRepository) GetTradeLogManualById(ctx context.Context, id int) (*repo.TradeLog, error) {
+	db := palisade_database.New(u.Postgree)
+	row, err := db.GetTradeLogManualById(ctx, id)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, wrap.Errorf("trade_log_manual id %d not found", id)
+		}
+		return nil, wrap.Errorf("failed to get trade_log_manual: %w", err)
+	}
+	return mapTradeLogManualToDomainModel(row), nil
+}
+
+func (u StateRepository) GetNextTradeIdManual(ctx context.Context) (int, error) {
+	db := palisade_database.New(u.Postgree)
+	maxID, err := db.GetLastTradeIdManual(ctx)
+	if err != nil {
+		return 0, wrap.Errorf("failed to get last manual trade id: %w", err)
+	}
+	if maxID < 200 {
+		maxID = 200
+	}
+	return maxID + 1, nil
+}
+
+func (u StateRepository) UpdateDealDateTradeLogManual(ctx context.Context, id int, dealDate time.Time) error {
+	db := palisade_database.New(u.Postgree)
+	err := db.UpdateDealDateTradeLogManual(ctx, palisade_database.UpdateDealDateTradeLogManualParams{
+		ID:       id,
+		DealDate: &dealDate,
+	})
+	if err != nil {
+		return wrap.Errorf("failed to update deal date manual id %d: %w", id, err)
+	}
+	return nil
+}
+
+func (u StateRepository) UpdateCancelDateTradeLogManual(ctx context.Context, id int, cancelDate time.Time) error {
+	db := palisade_database.New(u.Postgree)
+	err := db.UpdateCancelDateTradeLogManual(ctx, palisade_database.UpdateCancelDateTradeLogManualParams{
+		ID:         id,
+		CancelDate: &cancelDate,
+	})
+	if err != nil {
+		return wrap.Errorf("failed to update cancel date manual id %d: %w", id, err)
+	}
+	return nil
+}
+
+func (u StateRepository) UpdateSellOrderIdTradeLogManual(ctx context.Context, id int, sellOrderId string) error {
+	db := palisade_database.New(u.Postgree)
+	err := db.UpdateSellOrderIdTradeLogManual(ctx, palisade_database.UpdateSellOrderIdTradeLogManualParams{
+		ID:          id,
+		OrderidSell: &sellOrderId,
+	})
+	if err != nil {
+		return wrap.Errorf("failed to update sell order id manual %d: %w", id, err)
+	}
+	return nil
+}
+
+func (u StateRepository) UpdateSuccesTradeLogManual(ctx context.Context, id int, closeDate time.Time, closeBalance float64, sellPrice float64) error {
+	db := palisade_database.New(u.Postgree)
+	err := db.UpdateSuccesTradeLogManual(ctx, palisade_database.UpdateSuccesTradeLogManualParams{
+		ID:           id,
+		CloseDate:    &closeDate,
+		CloseBalance: &closeBalance,
+		SellPrice:    &sellPrice,
+	})
+	if err != nil {
+		return wrap.Errorf("failed to update success manual trade id %d: %w", id, err)
+	}
+	return nil
+}
+
 func mapCoinToDomainModel(c palisade_database.Coin) (*mexc.SymbolDetail, error) {
 	return &mexc.SymbolDetail{
 		Symbol:                   c.Symbol,

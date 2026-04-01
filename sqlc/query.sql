@@ -162,3 +162,58 @@ SELECT * FROM trade_log
 WHERE 
     close_date IS NULL
     AND cancel_date IS NULL;
+
+-- name: SaveTradeLogManual :one
+INSERT INTO trade_log_manual (
+   open_date,
+   open_balance,
+   symbol,
+   buy_price,
+   amount,
+   orderId,
+   upLevel,
+   downLevel
+   )
+   VALUES (
+           $1,
+           $2,
+           $3,
+           $4,
+           $5,
+           $6,
+           $7,
+           $8
+   )
+   RETURNING *;
+
+-- name: UpdateDealDateTradeLogManual :exec
+UPDATE trade_log_manual
+SET deal_date = $1
+WHERE id = $2;
+
+-- name: UpdateCancelDateTradeLogManual :exec
+UPDATE trade_log_manual
+SET cancel_date = $1
+WHERE id = $2;
+
+-- name: UpdateSellOrderIdTradeLogManual :exec
+UPDATE trade_log_manual
+SET orderId_sell = $1
+WHERE id = $2;
+
+-- name: UpdateSuccesTradeLogManual :exec
+UPDATE trade_log_manual
+SET close_date = $1, close_balance = $2, sell_price = $3
+WHERE id = $4;
+
+-- name: GetLastTradeIdManual :one
+SELECT COALESCE(MAX(id), 0) FROM trade_log_manual;
+
+-- name: GetOpenOrdersManual :many
+SELECT * FROM trade_log_manual
+WHERE 
+    close_date IS NULL
+    AND cancel_date IS NULL;
+
+-- name: GetTradeLogManualById :one
+SELECT * FROM trade_log_manual WHERE id = $1;

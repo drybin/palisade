@@ -90,3 +90,21 @@ type TradeLog struct {
 	Uplevel      float64
 	Downlevel    float64
 }
+
+type TradeLogManual struct {
+	ID           int
+	OpenDate     time.Time
+	DealDate     *time.Time
+	CloseDate    *time.Time
+	CancelDate   *time.Time
+	OpenBalance  float64
+	CloseBalance *float64
+	Symbol       string
+	BuyPrice     float64
+	SellPrice    *float64
+	Amount       float64
+	Orderid      string
+	OrderidSell  *string
+	Uplevel      float64
+	Downlevel    float64
+}

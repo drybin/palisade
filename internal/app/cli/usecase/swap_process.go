@@ -39,7 +39,7 @@ func NewSwapProcessUsecase(repo *webapi.MexcWebapi, stateRepo repo.IStateReposit
 }
 
 func (u *SwapProcess) Process(ctx context.Context) error {
-	fmt.Println("=== swap_process: поиск выгодной связки и исполнение лимитными ордерами ===\n")
+	fmt.Println("=== swap_process: поиск выгодной связки и исполнение лимитными ордерами ===")
 
 	// --- 1. Получаем тикеры и строим карту цен ---
 	fmt.Printf("[DEBUG] Загрузка тикеров...\n")
