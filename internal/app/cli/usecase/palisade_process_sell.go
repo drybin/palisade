@@ -213,11 +213,11 @@ func (u *PalisadeProcessSell) Process(ctx context.Context) error {
 
 		// Отправляем сообщение в Telegram
 		message := fmt.Sprintf(
-			"<b>⚠️ Нет на бирже</b> %s · <code>%s</code> · покупка %.8f×%.8f · открыт %s · БД cancel · %s · нет среди открытых (исполнен/отменён?)",
+			"<b>⚠️ Нет на бирже</b> %s · <code>%s</code> · покупка %s×%s · открыт %s · БД cancel · %s · нет среди открытых (исполнен/отменён?)",
 			dbOrder.Symbol,
 			dbOrder.OrderId,
-			dbOrder.BuyPrice,
-			dbOrder.Amount,
+			helpers.FormatFloatTrimZeros(dbOrder.BuyPrice),
+			helpers.FormatFloatTrimZeros(dbOrder.Amount),
 			dbOrder.OpenDate.Format("2006-01-02 15:04:05"),
 			cancelTime.Format("2006-01-02 15:04:05 MST"),
 		)
@@ -266,19 +266,19 @@ func (u *PalisadeProcessSell) Process(ctx context.Context) error {
 			profitPercent := (profit / buyCost) * 100
 
 			telegramMessage := fmt.Sprintf(
-				"<b>💰 Продажа завершена</b> %s · P/L %+.2f USDT (%+.2f%%) · buy <code>%s</code> sell <code>%s</code> · покупка %.8f×%.8f · баланс на откр %.2f USDT (%s) · продажа %.8f×%s = %.2f USDT (%s) · статус %s · %s",
+				"<b>💰 Продажа завершена</b> %s · P/L %s USDT (%s%%) · buy <code>%s</code> sell <code>%s</code> · покупка %s×%s · баланс на откр %s USDT (%s) · продажа %s×%s = %s USDT (%s) · статус %s · %s",
 				dbOrder.Symbol,
-				profit,
-				profitPercent,
+				helpers.FormatFloatSignTrimZeros(profit),
+				helpers.FormatFloatSignTrimZeros(profitPercent),
 				dbOrder.OrderId,
 				queryResult.OrderID,
-				dbOrder.BuyPrice,
-				dbOrder.Amount,
-				dbOrder.OpenBalance,
+				helpers.FormatFloatTrimZeros(dbOrder.BuyPrice),
+				helpers.FormatFloatTrimZeros(dbOrder.Amount),
+				helpers.FormatFloatTrimZeros(dbOrder.OpenBalance),
 				dbOrder.OpenDate.Format("2006-01-02 15:04:05"),
-				sellPrice,
-				queryResult.ExecutedQty,
-				closeBalance,
+				helpers.FormatFloatTrimZeros(sellPrice),
+				helpers.TrimDecimalZeros(queryResult.ExecutedQty),
+				helpers.FormatFloatTrimZeros(closeBalance),
 				closeTime.Format("2006-01-02 15:04:05"),
 				queryResult.Status,
 				closeTime.Format("2006-01-02 15:04:05 MST"),
@@ -446,11 +446,11 @@ func (u *PalisadeProcessSell) Process(ctx context.Context) error {
 			marketOrderTime := helpers.NowGMT7()
 			reasonOneLine := strings.ReplaceAll(strings.ReplaceAll(msg, "\n", " · "), "  ", " ")
 			telegramMessage := fmt.Sprintf(
-				"<b>🚨 Маркет-продажа</b> %s · sell <code>%s</code> · qty %.8f · цена ~%.8f · buy <code>%s</code> · открыт %s · %s · %s",
+				"<b>🚨 Маркет-продажа</b> %s · sell <code>%s</code> · qty %s · цена ~%s · buy <code>%s</code> · открыт %s · %s · %s",
 				dbOrder.Symbol,
 				placeOrderResult.OrderID,
-				dbOrder.Amount,
-				currentPrice.Price,
+				helpers.FormatFloatTrimZeros(dbOrder.Amount),
+				helpers.FormatFloatTrimZeros(currentPrice.Price),
 				dbOrder.OrderId,
 				dbOrder.OpenDate.Format("2006-01-02 15:04:05"),
 				marketOrderTime.Format("2006-01-02 15:04:05 MST"),
@@ -506,12 +506,12 @@ func (u *PalisadeProcessSell) Process(ctx context.Context) error {
 			hours := int(timeSinceOpen.Hours())
 			minutes := int(timeSinceOpen.Minutes()) % 60
 			message := fmt.Sprintf(
-				"<b>⏱️ Покупка отменена по времени</b> %s · <code>%s</code> · %s · %.8f×%.8f · открыт %s · висел %dч %dм · >2ч в NEW · БД cancel · %s",
+				"<b>⏱️ Покупка отменена по времени</b> %s · <code>%s</code> · %s · %s×%s · открыт %s · висел %dч %dм · >2ч в NEW · БД cancel · %s",
 				dbOrder.Symbol,
 				dbOrder.OrderId,
 				queryResult.Side,
-				dbOrder.BuyPrice,
-				dbOrder.Amount,
+				helpers.FormatFloatTrimZeros(dbOrder.BuyPrice),
+				helpers.FormatFloatTrimZeros(dbOrder.Amount),
 				dbOrder.OpenDate.Format("2006-01-02 15:04:05"),
 				hours,
 				minutes,
@@ -544,12 +544,12 @@ func (u *PalisadeProcessSell) Process(ctx context.Context) error {
 			reason = "Ордер истек"
 		}
 		message := fmt.Sprintf(
-			"<b>❌ Покупка %s</b> %s · <code>%s</code> · %.8f×%.8f · открыт %s · %s · БД cancel · %s",
+			"<b>❌ Покупка %s</b> %s · <code>%s</code> · %s×%s · открыт %s · %s · БД cancel · %s",
 			queryResult.Status,
 			dbOrder.Symbol,
 			queryResult.OrderID,
-			dbOrder.BuyPrice,
-			dbOrder.Amount,
+			helpers.FormatFloatTrimZeros(dbOrder.BuyPrice),
+			helpers.FormatFloatTrimZeros(dbOrder.Amount),
 			dbOrder.OpenDate.Format("2006-01-02 15:04:05"),
 			reason,
 			cancelTime.Format("2006-01-02 15:04:05 MST"),
@@ -564,11 +564,11 @@ func (u *PalisadeProcessSell) Process(ctx context.Context) error {
 
 		//Отправляем сообщение в Telegram
 		message := fmt.Sprintf(
-			"<b>✅ Покупка FILLED</b> %s · <code>%s</code> · %.8f×%.8f · открыт %s · далее лимит на продажу · %s",
+			"<b>✅ Покупка FILLED</b> %s · <code>%s</code> · %s×%s · открыт %s · далее лимит на продажу · %s",
 			dbOrder.Symbol,
 			queryResult.OrderID,
-			dbOrder.BuyPrice,
-			dbOrder.Amount,
+			helpers.FormatFloatTrimZeros(dbOrder.BuyPrice),
+			helpers.FormatFloatTrimZeros(dbOrder.Amount),
 			dbOrder.OpenDate.Format("2006-01-02 15:04:05"),
 			updateTime.Format("2006-01-02 15:04:05 MST"),
 		)
@@ -619,15 +619,15 @@ func (u *PalisadeProcessSell) Process(ctx context.Context) error {
 		// Отправляем сообщение в Telegram о размещении ордера на продажу
 		sellOrderTime := helpers.NowGMT7()
 		sellMessage := fmt.Sprintf(
-			"<b>💸 Лимит на продажу</b> %s · sell <code>%s</code> @ %.8f · qty %.8f · ~%.2f USDT · buy <code>%s</code> · %.8f×%.8f · открыт %s · %s",
+			"<b>💸 Лимит на продажу</b> %s · sell <code>%s</code> @ %s · qty %s · ~%s USDT · buy <code>%s</code> · %s×%s · открыт %s · %s",
 			dbOrder.Symbol,
 			placeOrderResult.OrderID,
-			dbOrder.UpLevel,
-			dbOrder.Amount,
-			dbOrder.UpLevel*dbOrder.Amount,
+			helpers.FormatFloatTrimZeros(dbOrder.UpLevel),
+			helpers.FormatFloatTrimZeros(dbOrder.Amount),
+			helpers.FormatFloatTrimZeros(dbOrder.UpLevel*dbOrder.Amount),
 			dbOrder.OrderId,
-			dbOrder.BuyPrice,
-			dbOrder.Amount,
+			helpers.FormatFloatTrimZeros(dbOrder.BuyPrice),
+			helpers.FormatFloatTrimZeros(dbOrder.Amount),
 			dbOrder.OpenDate.Format("2006-01-02 15:04:05"),
 			sellOrderTime.Format("2006-01-02 15:04:05 MST"),
 		)
@@ -642,14 +642,14 @@ func (u *PalisadeProcessSell) Process(ctx context.Context) error {
 
 		// Отправляем сообщение в Telegram
 		message := fmt.Sprintf(
-			"<b>⚠️ Частичная отмена покупки</b> %s · <code>%s</code> · %.8f×%.8f · открыт %s · исполнено %s / %s · %s",
+			"<b>⚠️ Частичная отмена покупки</b> %s · <code>%s</code> · %s×%s · открыт %s · исполнено %s / %s · %s",
 			dbOrder.Symbol,
 			queryResult.OrderID,
-			dbOrder.BuyPrice,
-			dbOrder.Amount,
+			helpers.FormatFloatTrimZeros(dbOrder.BuyPrice),
+			helpers.FormatFloatTrimZeros(dbOrder.Amount),
 			dbOrder.OpenDate.Format("2006-01-02 15:04:05"),
-			queryResult.ExecutedQty,
-			queryResult.OrigQty,
+			helpers.TrimDecimalZeros(queryResult.ExecutedQty),
+			helpers.TrimDecimalZeros(queryResult.OrigQty),
 			updateTime.Format("2006-01-02 15:04:05 MST"),
 		)
 		_, err = u.telegramApi.Send(message)
@@ -660,12 +660,12 @@ func (u *PalisadeProcessSell) Process(ctx context.Context) error {
 		updateTime := helpers.NowGMT7()
 
 		message := fmt.Sprintf(
-			"<b>⚠️ Неизвестный статус покупки</b> %s · <code>%s</code> · биржа status=%s · %.8f×%.8f · открыт %s · БД cancel · %s",
+			"<b>⚠️ Неизвестный статус покупки</b> %s · <code>%s</code> · биржа status=%s · %s×%s · открыт %s · БД cancel · %s",
 			dbOrder.Symbol,
 			dbOrder.OrderId,
 			queryResult.Status,
-			dbOrder.BuyPrice,
-			dbOrder.Amount,
+			helpers.FormatFloatTrimZeros(dbOrder.BuyPrice),
+			helpers.FormatFloatTrimZeros(dbOrder.Amount),
 			dbOrder.OpenDate.Format("2006-01-02 15:04:05"),
 			updateTime.Format("2006-01-02 15:04:05 MST"),
 		)

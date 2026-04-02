@@ -178,9 +178,17 @@ func (u *PalisadeProcessManual) Process(ctx context.Context, configPath string) 
 
 	totalBalance := usdtBalance.Free + usdtBalance.Locked
 	msg := fmt.Sprintf(
-		"<b>📥 Покупка [manual]</b> %s · S %.8f · R %.8f · ордер <code>%s</code> · цена %.8f · кол-во %.8f · ~%.2f USDT · баланс %.2f USDT (своб %.2f · блок %.2f)",
-		cfg.Symbol, cfg.Support, cfg.Resistance, placeOrderResult.OrderID, cfg.Support, quantity,
-		cfg.Support*quantity, totalBalance, usdtBalance.Free, usdtBalance.Locked,
+		"<b>📥 Покупка [manual]</b> %s · S %s · R %s · ордер <code>%s</code> · цена %s · кол-во %s · ~%s USDT · баланс %s USDT (своб %s · блок %s)",
+		cfg.Symbol,
+		helpers.FormatFloatTrimZeros(cfg.Support),
+		helpers.FormatFloatTrimZeros(cfg.Resistance),
+		placeOrderResult.OrderID,
+		helpers.FormatFloatTrimZeros(cfg.Support),
+		helpers.FormatFloatTrimZeros(quantity),
+		helpers.FormatFloatTrimZeros(cfg.Support*quantity),
+		helpers.FormatFloatTrimZeros(totalBalance),
+		helpers.FormatFloatTrimZeros(usdtBalance.Free),
+		helpers.FormatFloatTrimZeros(usdtBalance.Locked),
 	)
 	if _, err := u.telegramApi.Send(msg); err != nil {
 		fmt.Printf("⚠️  Telegram: %v\n", err)

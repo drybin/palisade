@@ -249,17 +249,17 @@ func (u *PalisadeProcess) Process(ctx context.Context) error {
 
 	totalBalance := usdtBalance.Free + usdtBalance.Locked
 	message := fmt.Sprintf(
-		"<b>📥 Покупка</b> %s · S %.8f · R %.8f · ордер <code>%s</code> · цена %.8f · кол-во %.8f · ~%.2f USDT · баланс %.2f USDT (своб %.2f · блок %.2f)",
+		"<b>📥 Покупка</b> %s · S %s · R %s · ордер <code>%s</code> · цена %s · кол-во %s · ~%s USDT · баланс %s USDT (своб %s · блок %s)",
 		coin.Symbol,
-		coin.Support,
-		coin.Resistance,
+		helpers.FormatFloatTrimZeros(coin.Support),
+		helpers.FormatFloatTrimZeros(coin.Resistance),
 		placeOrderResult.OrderID,
-		coin.Support,
-		quantity,
-		coin.Support*quantity,
-		totalBalance,
-		usdtBalance.Free,
-		usdtBalance.Locked,
+		helpers.FormatFloatTrimZeros(coin.Support),
+		helpers.FormatFloatTrimZeros(quantity),
+		helpers.FormatFloatTrimZeros(coin.Support*quantity),
+		helpers.FormatFloatTrimZeros(totalBalance),
+		helpers.FormatFloatTrimZeros(usdtBalance.Free),
+		helpers.FormatFloatTrimZeros(usdtBalance.Locked),
 	)
 	_, err = u.telegramApi.Send(message)
 	if err != nil {
