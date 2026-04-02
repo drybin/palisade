@@ -16,6 +16,9 @@ import (
 	"github.com/drybin/palisade/pkg/wrap"
 )
 
+// orderQuoteUSDT is the target USDT notional for the single-order palisade process buy.
+const orderQuoteUSDT = 10.0
+
 type IPalisadeProcess interface {
 	Process(ctx context.Context) error
 }
@@ -177,7 +180,7 @@ func (u *PalisadeProcess) Process(ctx context.Context) error {
 		return nil
 	}
 
-	quantity := 2.0 / coin.Support
+	quantity := orderQuoteUSDT / coin.Support
 
 	// Округлить количество согласно baseSizePrecision
 	baseSizePrecision, err := strconv.ParseFloat(coin.BaseSizePrecision, 64)
@@ -189,12 +192,12 @@ func (u *PalisadeProcess) Process(ctx context.Context) error {
 		// Если baseSizePrecision равно 0, округлить до ближайшего целого в меньшую сторону
 		quantity = math.Floor(quantity)
 		fmt.Printf("📏 Округление количества до целого: %.8f → %.8f (baseSizePrecision: %.8f)\n",
-			2.0/coin.Support, quantity, baseSizePrecision)
+			orderQuoteUSDT/coin.Support, quantity, baseSizePrecision)
 	} else {
 		// Округлить количество до ближайшего кратного baseSizePrecision
 		quantity = math.Floor(quantity/baseSizePrecision) * baseSizePrecision
 		fmt.Printf("📏 Округление количества: %.8f → %.8f (baseSizePrecision: %.8f)\n",
-			2.0/coin.Support, quantity, baseSizePrecision)
+			orderQuoteUSDT/coin.Support, quantity, baseSizePrecision)
 	}
 
 	if quantity <= 0 {
