@@ -21,7 +21,7 @@ import (
 const (
 	minProfitPercent     = 1.0
 	amountInUSDT         = 10.0
-	orderFillWaitTimeout = 60 * time.Second
+	orderFillWaitTimeout = 120 * time.Second
 	orderFillPollInterval = 3 * time.Second
 )
 
