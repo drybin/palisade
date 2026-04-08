@@ -14,3 +14,13 @@ func FindUSDTBalance(balances []mexc.Balance) (*mexc.Balance, error) {
 	}
 	return nil, wrap.Errorf("USDT balance not found")
 }
+
+// FindAssetBalance находит баланс по тикеру актива (например ETH, BTC).
+func FindAssetBalance(balances []mexc.Balance, asset string) (*mexc.Balance, error) {
+	for i := range balances {
+		if balances[i].Asset == asset {
+			return &balances[i], nil
+		}
+	}
+	return nil, wrap.Errorf("balance for %s not found", asset)
+}

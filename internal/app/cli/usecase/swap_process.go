@@ -19,10 +19,12 @@ import (
 )
 
 const (
-	minProfitPercent     = 1.0
-	amountInUSDT         = 10.0
-	orderFillWaitTimeout = 120 * time.Second
+	minProfitPercent      = 1.0
+	amountInUSDT          = 10.0
+	orderFillWaitTimeout  = 120 * time.Second
 	orderFillPollInterval = 3 * time.Second
+	// swapIntermediateBuffer — запас под комиссию и округление между шагами цепочки.
+	swapIntermediateBuffer = 0.999
 )
 
 type ISwapProcess interface {
@@ -228,16 +230,31 @@ func (u *SwapProcess) Process(ctx context.Context) error {
 		return err
 	}
 
-	// --- Шаг 2: Лимитный ордер на паре A-B (используем фактически купленное qty1) ---
-	// usedDirectAB: пара AB (base=A, quote=B) — продаём A → SELL, quantity=qty1
-	// иначе пара BA (base=B, quote=A) — покупаем B за A → BUY, quantity = qty1/priceBA
+	acctAfter1, err := u.repo.GetBalance(ctx)
+	if err != nil {
+		return wrap.Errorf("balance after step 1: %w", err)
+	}
+	balA, err := helpers.FindAssetBalance(acctAfter1.Balances, best.baseA)
+	if err != nil {
+		return err
+	}
+	qtyAActual := balA.Free * swapIntermediateBuffer
+	fmt.Printf("[DEBUG] Доступно %s для шага 2 (с запасом): %.8f (free=%.8f)\n", best.baseA, qtyAActual, balA.Free)
+
+	// --- Шаг 2: Лимитный ордер на паре A-B по фактическому балансу A (после комиссии шага 1) ---
+	// usedDirectAB: пара AB (base=A, quote=B) — продаём A → SELL
+	// иначе пара BA (base=B, quote=A) — покупаем B за A → BUY; стоимость в A = qty2*price
 	var qty2 float64
 	price2 := chain.priceAB
 	if chain.usedDirectAB {
-		qty2 = roundQty(qty1, precisionAB)
+		qty2 = roundQty(math.Min(qty1, qtyAActual), precisionAB)
 	} else {
-		amountBFromA := qty1 / chain.priceAB
-		qty2 = roundQty(amountBFromA, precisionAB)
+		planB := qty1 / chain.priceAB
+		maxAffordB := qtyAActual / chain.priceAB
+		qty2 = roundQty(math.Min(planB, maxAffordB), precisionAB)
+	}
+	if qty2 <= 0 {
+		return wrap.Errorf("шаг 2: после учёта баланса %s количество по паре %s обнулилось", best.baseA, chain.symbolAB)
 	}
 
 	clientOrderId2 := fmt.Sprintf("swap_%d_2_%s", runID, chain.symbolAB)
