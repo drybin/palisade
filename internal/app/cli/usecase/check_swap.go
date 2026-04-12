@@ -1,16 +1,15 @@
 package usecase
 
 import (
-    "context"
-    "fmt"
-    "sort"
-    "strconv"
-    "strings"
-    
-    "github.com/drybin/palisade/internal/adapter/webapi"
-    "github.com/drybin/palisade/internal/domain/model/mexc"
-    "github.com/drybin/palisade/internal/domain/repo"
-    "github.com/drybin/palisade/pkg/wrap"
+	"context"
+	"fmt"
+	"sort"
+	"strings"
+
+	"github.com/drybin/palisade/internal/adapter/webapi"
+	"github.com/drybin/palisade/internal/domain/model/mexc"
+	"github.com/drybin/palisade/internal/domain/repo"
+	"github.com/drybin/palisade/pkg/wrap"
 )
 
 type ICheckSwap interface {
@@ -27,20 +26,11 @@ func NewCheckSwapUsecase(repo *webapi.MexcWebapi, stateRepo repo.IStateRepositor
 }
 
 func (u *CheckSwap) Process(ctx context.Context, quiet bool) error {
-    tickers, err := u.repo.GetAllTickerPrices(ctx)
+    bookRows, err := u.repo.GetAllBookTickers(ctx)
     if err != nil {
-        return wrap.Errorf("failed to get ticker prices: %w", err)
+        return wrap.Errorf("failed to get book tickers: %w", err)
     }
-    
-    // Карта символов пар -> цена (float64)
-    priceMap := make(map[string]float64, len(*tickers))
-    for _, t := range *tickers {
-        p, err := strconv.ParseFloat(t.Price, 64)
-        if err != nil || p <= 0 {
-            continue
-        }
-        priceMap[t.Symbol] = p
-    }
+    book := BuildSwapBookMap(bookRows)
     
     // Тип и расчёт allChains вынесены для использования в обоих режимах
     type chainProfit struct {
@@ -49,7 +39,7 @@ func (u *CheckSwap) Process(ctx context.Context, quiet bool) error {
     }
     allowedHubs := map[string]bool{"BTC": true, "ETH": true, "USDC": true}
     baseAssets := make([]string, 0)
-    for symbol := range priceMap {
+    for symbol := range book {
         if strings.HasSuffix(symbol, "USDT") && len(symbol) > 4 {
             base := symbol[:len(symbol)-4]
             baseAssets = append(baseAssets, base)
@@ -68,7 +58,7 @@ func (u *CheckSwap) Process(ctx context.Context, quiet bool) error {
             }
             coinA := mexc.SymbolDetail{BaseAsset: baseA, Symbol: baseA + "USDT", QuoteAsset: "USDT"}
             coinB := mexc.SymbolDetail{BaseAsset: baseB, Symbol: baseB + "USDT", QuoteAsset: "USDT"}
-            res, ok := u.calcChainProfit(priceMap, &coinA, &coinB)
+            res, ok := calcSwapChainFromBook(book, &coinA, &coinB)
             if !ok {
                 continue
             }
@@ -89,7 +79,7 @@ func (u *CheckSwap) Process(ctx context.Context, quiet bool) error {
         return nil
     }
     
-    fmt.Printf("Тикеров с ценой: %d\n", len(priceMap))
+    fmt.Printf("Символов с bid/ask в book ticker: %d\n", len(book))
     
     spotTradingAllowed := true
     allCoins, err := u.stateRepo.GetCoins(ctx, repo.GetCoinsParams{
@@ -138,44 +128,48 @@ func (u *CheckSwap) Process(ctx context.Context, quiet bool) error {
     
     fmt.Printf("--- Дебаг цепочки USDT -> %s -> %s -> USDT ---\n\n", baseA, baseB)
     
-    res, ok := u.calcChainProfit(priceMap, &coinA, &coinB)
+    res, ok := calcSwapChainFromBook(book, &coinA, &coinB)
     if !ok {
         // Выводим, чего не хватает
         fmt.Printf("Цепочка USDT -> %s -> %s -> USDT: не хватает данных.\n", baseA, baseB)
-        if _, ok1 := priceMap[symbolA]; !ok1 {
-            fmt.Printf("  Нет в тикерах: %s\n", symbolA)
-        } else {
-            fmt.Printf("  %s: есть, цена = %.8g\n", symbolA, priceMap[symbolA])
-        }
-        if _, ok2 := priceMap[symbolB]; !ok2 {
-            fmt.Printf("  Нет в тикерах: %s\n", symbolB)
-        } else {
-            fmt.Printf("  %s: есть, цена = %.8g\n", symbolB, priceMap[symbolB])
-        }
-        symbolAB := baseA + baseB
-        symbolBA := baseB + baseA
-        if _, ok3 := priceMap[symbolAB]; !ok3 {
-            fmt.Printf("  Нет в тикерах: %s\n", symbolAB)
-        } else {
-            fmt.Printf("  %s: есть, цена = %.8g\n", symbolAB, priceMap[symbolAB])
-        }
-        if _, ok4 := priceMap[symbolBA]; !ok4 {
-            fmt.Printf("  Нет в тикерах: %s\n", symbolBA)
-        } else {
-            fmt.Printf("  %s: есть, цена = %.8g\n", symbolBA, priceMap[symbolBA])
-        }
+		printBook := func(sym string, needAsk, needBid bool) {
+			q, okq := book[sym]
+			if !okq {
+				fmt.Printf("  Нет в book ticker: %s\n", sym)
+				return
+			}
+			if needAsk && q.Ask <= 0 {
+				fmt.Printf("  %s: нет ask (bid=%.8g)\n", sym, q.Bid)
+				return
+			}
+			if needBid && q.Bid <= 0 {
+				fmt.Printf("  %s: нет bid (ask=%.8g)\n", sym, q.Ask)
+				return
+			}
+			fmt.Printf("  %s: bid=%.8g ask=%.8g\n", sym, q.Bid, q.Ask)
+		}
+		printBook(symbolA, true, false)
+		printBook(symbolB, false, true)
+		symbolAB := baseA + baseB
+		symbolBA := baseB + baseA
+		printBook(symbolAB, false, true)
+		printBook(symbolBA, true, false)
         return nil
     }
     
     fmt.Printf("Цепочка: USDT -> %s -> %s -> USDT\n\n", coinA.BaseAsset, coinB.BaseAsset)
     
-    fmt.Println("Шаг 1: Покупаем", coinA.BaseAsset, "за USDT")
-    fmt.Printf("  Цена %s: %.8g USDT за 1 %s\n", coinA.Symbol, res.priceAUSDT, coinA.BaseAsset)
+    fmt.Println("Шаг 1: Покупаем", coinA.BaseAsset, "за USDT (лимит по best ask)")
+    fmt.Printf("  Ask %s: %.8g USDT за 1 %s\n", coinA.Symbol, res.priceAUSDT, coinA.BaseAsset)
     fmt.Printf("  Потратили: 1 USDT\n")
     fmt.Printf("  Получили: 1 / %.8g = %.8g %s\n\n", res.priceAUSDT, res.amountA, coinA.BaseAsset)
     
     fmt.Printf("Шаг 2: Меняем %s на %s\n", coinA.BaseAsset, coinB.BaseAsset)
-    fmt.Printf("  Пара %s: %.8g (за 1 %s получаем столько %s)\n", res.symbolAB, res.priceAB, coinA.BaseAsset, coinB.BaseAsset)
+    if res.usedDirectAB {
+        fmt.Printf("  Пара %s: best bid %.8g (SELL %s)\n", res.symbolAB, res.priceAB, coinA.BaseAsset)
+    } else {
+        fmt.Printf("  Пара %s: best ask %.8g (BUY %s за %s)\n", res.symbolAB, res.priceAB, coinB.BaseAsset, coinA.BaseAsset)
+    }
     if res.usedDirectAB {
         fmt.Printf("  Отдаём: %.8g %s\n", res.amountA, coinA.BaseAsset)
         fmt.Printf("  Получаем: %.8g * %.8g = %.8g %s\n\n", res.amountA, res.priceAB, res.amountB, coinB.BaseAsset)
@@ -184,8 +178,8 @@ func (u *CheckSwap) Process(ctx context.Context, quiet bool) error {
         fmt.Printf("  Получаем: %.8g / %.8g = %.8g %s\n\n", res.amountA, res.priceAB, res.amountB, coinB.BaseAsset)
     }
     
-    fmt.Printf("Шаг 3: Продаём %s за USDT\n", coinB.BaseAsset)
-    fmt.Printf("  Цена %s: %.8g USDT за 1 %s\n", coinB.Symbol, res.priceBUSDT, coinB.BaseAsset)
+    fmt.Printf("Шаг 3: Продаём %s за USDT (лимит по best bid)\n", coinB.BaseAsset)
+    fmt.Printf("  Bid %s: %.8g USDT за 1 %s\n", coinB.Symbol, res.priceBUSDT, coinB.BaseAsset)
     fmt.Printf("  Отдаём: %.8g %s\n", res.amountB, coinB.BaseAsset)
     fmt.Printf("  Получаем: %.8g * %.8g = %.8g USDT\n\n", res.amountB, res.priceBUSDT, res.amountUSDT)
     
@@ -225,130 +219,9 @@ func (u *CheckSwap) Process(ctx context.Context, quiet bool) error {
         fmt.Printf("  %d. USDT -> %s -> %s -> USDT  |  %.4f%%\n", i+1, c.baseA, c.baseB, c.profit)
     }
     if top == 0 {
-        fmt.Println("  Нет цепочек с полными данными (нет пар A-B в тикерах).")
+        fmt.Println("  Нет цепочек с полными данными (нет пар A-B в book ticker).")
     }
     
     return nil
 }
 
-// calcChainProfit считает цепочку USDT -> A -> B -> USDT (старт с 1 USDT). Без дебаг-строк.
-// Для пары с USDT используем BaseAsset+"USDT" (как в тикерах биржи), а не coin.Symbol из БД.
-func (u *CheckSwap) calcChainProfit(priceMap map[string]float64, coinA, coinB *mexc.SymbolDetail) (chainResult, bool) {
-    var res chainResult
-    symbolAUSDT := coinA.BaseAsset + "USDT"
-    symbolBUSDT := coinB.BaseAsset + "USDT"
-    priceAUSDT, ok := priceMap[symbolAUSDT]
-    if !ok || priceAUSDT <= 0 {
-        return res, false
-    }
-    priceBUSDT, ok := priceMap[symbolBUSDT]
-    if !ok || priceBUSDT <= 0 {
-        return res, false
-    }
-    res.priceAUSDT = priceAUSDT
-    res.priceBUSDT = priceBUSDT
-    amountA := 1.0 / priceAUSDT
-    if amountA <= 0 {
-        return res, false
-    }
-    res.amountA = amountA
-    symbolAB := coinA.BaseAsset + coinB.BaseAsset
-    symbolBA := coinB.BaseAsset + coinA.BaseAsset
-    if priceAB, ok := priceMap[symbolAB]; ok && priceAB > 0 {
-        res.amountB = amountA * priceAB
-        res.symbolAB = symbolAB
-        res.priceAB = priceAB
-        res.usedDirectAB = true
-    } else if priceBA, ok := priceMap[symbolBA]; ok && priceBA > 0 {
-        res.amountB = amountA / priceBA
-        res.symbolAB = symbolBA
-        res.priceAB = priceBA
-        res.usedDirectAB = false
-    } else {
-        return res, false
-    }
-    if res.amountB <= 0 {
-        return res, false
-    }
-    res.amountUSDT = res.amountB * priceBUSDT
-    res.profitPercent = (res.amountUSDT - 1.0) * 100.0
-    return res, true
-}
-
-// chainResult — результат расчёта цепочки USDT -> A -> B -> USDT.
-type chainResult struct {
-    priceAUSDT    float64
-    priceBUSDT    float64
-    symbolAB      string // какая пара использована (AB или BA)
-    priceAB       float64
-    amountA       float64
-    amountB       float64
-    amountUSDT    float64
-    profitPercent float64
-    usedDirectAB  bool // true: amountB = amountA * price; false: amountB = amountA / price
-}
-
-// calcChainProfitWithDebug считает цепочку и возвращает дебаг-строки по каждому шагу проверки.
-// Для пары с USDT используем BaseAsset+"USDT" (как в тикерах биржи).
-//
-//nolint:unused
-func (u *CheckSwap) calcChainProfitWithDebug(priceMap map[string]float64, coinA, coinB *mexc.SymbolDetail) (chainResult, bool, []string) {
-    var res chainResult
-    var lines []string
-    symbolAUSDT := coinA.BaseAsset + "USDT"
-    symbolBUSDT := coinB.BaseAsset + "USDT"
-    
-    priceAUSDT, okA := priceMap[symbolAUSDT]
-    if !okA || priceAUSDT <= 0 {
-        lines = append(lines, fmt.Sprintf("    %s: нет в тикерах", symbolAUSDT))
-        return res, false, lines
-    }
-    lines = append(lines, fmt.Sprintf("    %s: ok = %.8g", symbolAUSDT, priceAUSDT))
-    res.priceAUSDT = priceAUSDT
-    
-    priceBUSDT, okB := priceMap[symbolBUSDT]
-    if !okB || priceBUSDT <= 0 {
-        lines = append(lines, fmt.Sprintf("    %s: нет в тикерах", symbolBUSDT))
-        return res, false, lines
-    }
-    lines = append(lines, fmt.Sprintf("    %s: ok = %.8g", symbolBUSDT, priceBUSDT))
-    res.priceBUSDT = priceBUSDT
-    
-    amountA := 1.0 / priceAUSDT
-    if amountA <= 0 {
-        lines = append(lines, "    расчёт amountA: ошибка (деление на ноль)")
-        return res, false, lines
-    }
-    res.amountA = amountA
-    
-    symbolAB := coinA.BaseAsset + coinB.BaseAsset
-    symbolBA := coinB.BaseAsset + coinA.BaseAsset
-    var amountB float64
-    if priceAB, ok := priceMap[symbolAB]; ok && priceAB > 0 {
-        amountB = amountA * priceAB
-        res.symbolAB = symbolAB
-        res.priceAB = priceAB
-        res.usedDirectAB = true
-        lines = append(lines, fmt.Sprintf("    %s: ok = %.8g (используем для A->B)", symbolAB, priceAB))
-    } else if priceBA, ok := priceMap[symbolBA]; ok && priceBA > 0 {
-        amountB = amountA / priceBA
-        res.symbolAB = symbolBA
-        res.priceAB = priceBA
-        res.usedDirectAB = false
-        lines = append(lines, fmt.Sprintf("    %s: ok = %.8g (используем для A->B)", symbolBA, priceBA))
-    } else {
-        lines = append(lines, fmt.Sprintf("    пара A-B: нет (проверены %s, %s)", symbolAB, symbolBA))
-        return res, false, lines
-    }
-    if amountB <= 0 {
-        lines = append(lines, "    расчёт amountB: ошибка")
-        return res, false, lines
-    }
-    res.amountB = amountB
-    
-    amountUSDT := amountB * priceBUSDT
-    res.amountUSDT = amountUSDT
-    res.profitPercent = (amountUSDT - 1.0) * 100.0
-    lines = append(lines, fmt.Sprintf("    цены для расчёта: %s=%.8g  %s=%.8g  %s=%.8g", coinA.Symbol, res.priceAUSDT, res.symbolAB, res.priceAB, coinB.Symbol, res.priceBUSDT))
-    return res, true, lines
-}

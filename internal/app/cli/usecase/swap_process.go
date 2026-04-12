@@ -43,21 +43,14 @@ func NewSwapProcessUsecase(repo *webapi.MexcWebapi, stateRepo repo.IStateReposit
 func (u *SwapProcess) Process(ctx context.Context) error {
 	fmt.Println("=== swap_process: поиск выгодной связки и исполнение лимитными ордерами ===")
 
-	// --- 1. Получаем тикеры и строим карту цен ---
-	fmt.Printf("[DEBUG] Загрузка тикеров...\n")
-	tickers, err := u.repo.GetAllTickerPrices(ctx)
+	// --- 1. Book ticker (best bid/ask) — исполнимые цены для расчёта и лимитов ---
+	fmt.Printf("[DEBUG] Загрузка book ticker (bid/ask)...\n")
+	bookRows, err := u.repo.GetAllBookTickers(ctx)
 	if err != nil {
-		return wrap.Errorf("failed to get ticker prices: %w", err)
+		return wrap.Errorf("failed to get book tickers: %w", err)
 	}
-	priceMap := make(map[string]float64, len(*tickers))
-	for _, t := range *tickers {
-		p, err := strconv.ParseFloat(t.Price, 64)
-		if err != nil || p <= 0 {
-			continue
-		}
-		priceMap[t.Symbol] = p
-	}
-	fmt.Printf("[DEBUG] Загружено тикеров с ценой: %d\n\n", len(priceMap))
+	book := BuildSwapBookMap(bookRows)
+	fmt.Printf("[DEBUG] Загружено символов с bid/ask: %d\n\n", len(book))
 
 	// --- Список символов, по которым разрешена спот-торговля (из БД) ---
 	spotTradingAllowed := true
@@ -78,7 +71,7 @@ func (u *SwapProcess) Process(ctx context.Context) error {
 	// --- 2. Строим все цепочки USDT -> A -> B -> USDT (через BTC/ETH/USDC), только если все 3 пары в списке разрешённых ---
 	allowedHubs := map[string]bool{"BTC": true, "ETH": true, "USDC": true}
 	var baseAssets []string
-	for symbol := range priceMap {
+	for symbol := range book {
 		if strings.HasSuffix(symbol, "USDT") && len(symbol) > 4 {
 			base := symbol[:len(symbol)-4]
 			baseAssets = append(baseAssets, base)
@@ -107,7 +100,7 @@ func (u *SwapProcess) Process(ctx context.Context) error {
 			}
 			coinA := mexc.SymbolDetail{BaseAsset: baseA, Symbol: symbolAUSDT, QuoteAsset: "USDT"}
 			coinB := mexc.SymbolDetail{BaseAsset: baseB, Symbol: symbolBUSDT, QuoteAsset: "USDT"}
-			res, ok := u.calcChainProfit(priceMap, &coinA, &coinB)
+			res, ok := calcSwapChainFromBook(book, &coinA, &coinB)
 			if !ok {
 				continue
 			}
@@ -143,7 +136,7 @@ func (u *SwapProcess) Process(ctx context.Context) error {
 
 	coinA := mexc.SymbolDetail{BaseAsset: best.baseA, Symbol: best.baseA + "USDT", QuoteAsset: "USDT"}
 	coinB := mexc.SymbolDetail{BaseAsset: best.baseB, Symbol: best.baseB + "USDT", QuoteAsset: "USDT"}
-	chain, ok := u.calcChainProfit(priceMap, &coinA, &coinB)
+	chain, ok := calcSwapChainFromBook(book, &coinA, &coinB)
 	if !ok {
 		return wrap.Errorf("chain %s -> %s recalc failed", best.baseA, best.baseB)
 	}
@@ -207,7 +200,7 @@ func (u *SwapProcess) Process(ctx context.Context) error {
 	qty1 := roundQty(amountInUSDT/chain.priceAUSDT, precisionA)
 	price1 := chain.priceAUSDT
 
-	fmt.Printf("[DEBUG] Шаг 1: BUY %s | quantity=%.8f price=%.8f (quote≈%.2f USDT)\n", symbolA, qty1, price1, qty1*price1)
+	fmt.Printf("[DEBUG] Шаг 1: BUY %s @ ask | quantity=%.8f price=%.8f (quote≈%.2f USDT)\n", symbolA, qty1, price1, qty1*price1)
 
 	runID := time.Now().UnixMilli()
 	// --- Шаг 1: Лимитный ордер BUY A за USDT ---
@@ -265,7 +258,11 @@ func (u *SwapProcess) Process(ctx context.Context) error {
 	} else {
 		side2 = order.BUY
 	}
-	fmt.Printf("[DEBUG] Шаг 2: %s %s | quantity=%.8f price=%.8f\n", side2.String(), chain.symbolAB, qty2, price2)
+	leg2BookSide := "ask"
+	if chain.usedDirectAB {
+		leg2BookSide = "bid"
+	}
+	fmt.Printf("[DEBUG] Шаг 2: %s %s @ %s | quantity=%.8f price=%.8f\n", side2.String(), chain.symbolAB, leg2BookSide, qty2, price2)
 
 	order2, err := u.repo.NewOrder(model.OrderParams{
 		Symbol:           chain.symbolAB,
@@ -293,7 +290,7 @@ func (u *SwapProcess) Process(ctx context.Context) error {
 	}
 	qty3 := roundQty(amountBActual, precisionB)
 	price3 := chain.priceBUSDT
-	fmt.Printf("[DEBUG] Шаг 3: SELL %s | quantity=%.8f price=%.8f\n", symbolB, qty3, price3)
+	fmt.Printf("[DEBUG] Шаг 3: SELL %s @ bid | quantity=%.8f price=%.8f\n", symbolB, qty3, price3)
 
 	clientOrderId3 := fmt.Sprintf("swap_%d_3_%s", runID, best.baseB)
 
@@ -355,57 +352,3 @@ func (u *SwapProcess) findSymbolDetail(info *mexc.SymbolInfo, symbol string) *me
 	return nil
 }
 
-// calcChainProfit считает цепочку USDT -> A -> B -> USDT (старт с 1 USDT).
-func (u *SwapProcess) calcChainProfit(priceMap map[string]float64, coinA, coinB *mexc.SymbolDetail) (swapChainResult, bool) {
-	var res swapChainResult
-	symbolAUSDT := coinA.BaseAsset + "USDT"
-	symbolBUSDT := coinB.BaseAsset + "USDT"
-	priceAUSDT, ok := priceMap[symbolAUSDT]
-	if !ok || priceAUSDT <= 0 {
-		return res, false
-	}
-	priceBUSDT, ok := priceMap[symbolBUSDT]
-	if !ok || priceBUSDT <= 0 {
-		return res, false
-	}
-	res.priceAUSDT = priceAUSDT
-	res.priceBUSDT = priceBUSDT
-	amountA := 1.0 / priceAUSDT
-	if amountA <= 0 {
-		return res, false
-	}
-	res.amountA = amountA
-	symbolAB := coinA.BaseAsset + coinB.BaseAsset
-	symbolBA := coinB.BaseAsset + coinA.BaseAsset
-	if priceAB, ok := priceMap[symbolAB]; ok && priceAB > 0 {
-		res.amountB = amountA * priceAB
-		res.symbolAB = symbolAB
-		res.priceAB = priceAB
-		res.usedDirectAB = true
-	} else if priceBA, ok := priceMap[symbolBA]; ok && priceBA > 0 {
-		res.amountB = amountA / priceBA
-		res.symbolAB = symbolBA
-		res.priceAB = priceBA
-		res.usedDirectAB = false
-	} else {
-		return res, false
-	}
-	if res.amountB <= 0 {
-		return res, false
-	}
-	res.amountUSDT = res.amountB * priceBUSDT
-	res.profitPercent = (res.amountUSDT - 1.0) * 100.0
-	return res, true
-}
-
-type swapChainResult struct {
-	priceAUSDT    float64
-	priceBUSDT    float64
-	symbolAB      string
-	priceAB       float64
-	amountA       float64
-	amountB       float64
-	amountUSDT    float64
-	profitPercent float64
-	usedDirectAB  bool
-}

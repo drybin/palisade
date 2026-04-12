@@ -72,6 +72,31 @@ func (m *MexcWebapi) GetAllTickerPrices(ctx context.Context) (*mexc.TickersWithP
 	return &result, nil
 }
 
+// GetAllBookTickers возвращает лучший bid/ask по всем символам (GET /api/v3/ticker/bookTicker).
+func (m *MexcWebapi) GetAllBookTickers(ctx context.Context) (*mexc.BookTickers, error) {
+	_ = ctx
+	res := m.spot.BookTicker(nil)
+	bytes, err := json.Marshal(res)
+	if err != nil {
+		return nil, wrap.Errorf("failed to marshal book ticker response: %w", err)
+	}
+
+	var arr mexc.BookTickers
+	if err := json.Unmarshal(bytes, &arr); err == nil && len(arr) > 0 {
+		return &arr, nil
+	}
+
+	var single mexc.BookTicker
+	if err := json.Unmarshal(bytes, &single); err != nil {
+		return nil, wrap.Errorf("failed to unmarshal book ticker info: %w", err)
+	}
+	if single.Symbol == "" {
+		return nil, wrap.Errorf("book ticker response empty")
+	}
+	out := mexc.BookTickers{single}
+	return &out, nil
+}
+
 func (m *MexcWebapi) GetSymbolInfo(ctx context.Context, symbol string) (*mexc.SymbolInfo, error) {
 	options := map[string]string{
 		"symbol": symbol,
