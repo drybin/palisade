@@ -52,8 +52,11 @@ func NewContainer(
 	mexcApi := repo.NewMexcWebapi(httpClient, mexcSpot, config.MexcConfig)
 	mexcV2Api := repo.NewMexcV2Webapi(httpClient, config.MexcConfig)
 
-	// Создаем отдельный HTTP клиент для Telegram API
-	telegramHttpClient := resty.New()
+	// Создаем отдельный HTTP клиент для Telegram API (опционально через TG_SOCKS5_PROXY)
+	telegramHttpClient, err := newTelegramRestyClient(config.TgConfig)
+	if err != nil {
+		return nil, err
+	}
 	telegramApi := repo.NewTelegramWebapi(telegramHttpClient, config.TgConfig.BotToken, config.TgConfig.ChatId)
 
 	db, err := newDbConn(config)

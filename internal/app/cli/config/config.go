@@ -18,9 +18,10 @@ type Config struct {
 }
 
 type TgConfig struct {
-	BotToken string
-	ChatId   string
-	Timeout  time.Duration
+	BotToken       string
+	ChatId         string
+	Timeout        time.Duration
+	Socks5ProxyURL string // optional; Telegram HTTP client only
 }
 
 type MexcConfig struct {
@@ -83,9 +84,10 @@ func InitConfig() (*Config, error) {
 
 func initTgConfig() TgConfig {
 	return TgConfig{
-		BotToken: env.GetString("TG_BOT_TOKEN", ""),
-		ChatId:   env.GetString("TG_CHAT_ID", ""),
-		Timeout:  10 * time.Second,
+		BotToken:       env.GetString("TG_BOT_TOKEN", ""),
+		ChatId:         env.GetString("TG_CHAT_ID", ""),
+		Timeout:        10 * time.Second,
+		Socks5ProxyURL: env.GetString("TG_SOCKS5_PROXY", ""),
 	}
 }
 
