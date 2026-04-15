@@ -18,6 +18,36 @@ import (
 	"github.com/drybin/palisade/pkg/wrap"
 )
 
+// swapLotStep — шаг количества базового актива: baseSizePrecision с биржи, иначе 10^-baseAssetPrecision.
+func swapLotStep(sym *mexc.SymbolDetail) (float64, error) {
+	if sym == nil {
+		return 0, wrap.Errorf("symbol detail is nil")
+	}
+	raw := strings.TrimSpace(sym.BaseSizePrecision)
+	if raw != "" {
+		step, err := strconv.ParseFloat(raw, 64)
+		if err != nil {
+			return 0, wrap.Errorf("parse baseSizePrecision %q for %s: %w", raw, sym.Symbol, err)
+		}
+		if step > 0 {
+			return step, nil
+		}
+	}
+	if sym.BaseAssetPrecision > 0 {
+		return math.Pow(10, -sym.BaseAssetPrecision), nil
+	}
+	return 0, wrap.Errorf("no valid lot step for %s (baseSizePrecision=%q baseAssetPrecision=%v)",
+		sym.Symbol, sym.BaseSizePrecision, sym.BaseAssetPrecision)
+}
+
+// swapRoundQtyDown — количество не больше qty, кратное step (вниз), без math.Floor(qty) для дробей.
+func swapRoundQtyDown(qty, step float64) float64 {
+	if qty <= 0 || step <= 0 {
+		return 0
+	}
+	return math.Floor(qty/step) * step
+}
+
 const (
 	minProfitPercent      = 1.0
 	amountInUSDT          = 10.0
@@ -186,19 +216,49 @@ func (u *SwapProcess) Process(ctx context.Context) error {
 		return wrap.Errorf("symbol not found in exchange info")
 	}
 
-	precisionA, _ := strconv.ParseFloat(symA.BaseSizePrecision, 64)
-	precisionB, _ := strconv.ParseFloat(symB.BaseSizePrecision, 64)
-	precisionAB, _ := strconv.ParseFloat(symAB.BaseSizePrecision, 64)
-
-	roundQty := func(qty, precision float64) float64 {
-		if precision <= 0 {
-			return math.Floor(qty)
-		}
-		return math.Floor(qty/precision) * precision
+	stepA, err := swapLotStep(symA)
+	if err != nil {
+		return wrap.Errorf("%s: %w", symbolA, err)
+	}
+	stepB, err := swapLotStep(symB)
+	if err != nil {
+		return wrap.Errorf("%s: %w", symbolB, err)
+	}
+	stepAB, err := swapLotStep(symAB)
+	if err != nil {
+		return wrap.Errorf("%s: %w", chain.symbolAB, err)
 	}
 
-	qty1 := roundQty(amountInUSDT/chain.priceAUSDT, precisionA)
+	qty1 := swapRoundQtyDown(amountInUSDT/chain.priceAUSDT, stepA)
 	price1 := chain.priceAUSDT
+	if qty1 <= 0 {
+		return wrap.Errorf("шаг 1: количество после округления обнулилось (%s step=%g)", symbolA, stepA)
+	}
+
+	// Preflight шагов 2–3 по ожидаемому балансу после шага 1 (без math.Floor(qty) при невалидном step).
+	qtyAExpected := qty1 * swapIntermediateBuffer
+	var qty2pref float64
+	if chain.usedDirectAB {
+		qty2pref = swapRoundQtyDown(math.Min(qty1, qtyAExpected), stepAB)
+	} else {
+		planB := qty1 / chain.priceAB
+		maxAffordB := qtyAExpected / chain.priceAB
+		qty2pref = swapRoundQtyDown(math.Min(planB, maxAffordB), stepAB)
+	}
+	if qty2pref <= 0 {
+		return wrap.Errorf("preflight шаг 2: по паре %s количество обнулилось (step=%g, ожидаемо %s≈%.8f)",
+			chain.symbolAB, stepAB, best.baseA, qtyAExpected)
+	}
+	var amountBpref float64
+	if chain.usedDirectAB {
+		amountBpref = qty2pref * chain.priceAB
+	} else {
+		amountBpref = qty2pref
+	}
+	qty3pref := swapRoundQtyDown(amountBpref, stepB)
+	if qty3pref <= 0 {
+		return wrap.Errorf("preflight шаг 3: по %s количество обнулилось (step=%g)", symbolB, stepB)
+	}
 
 	fmt.Printf("[DEBUG] Шаг 1: BUY %s @ ask | quantity=%.8f price=%.8f (quote≈%.2f USDT)\n", symbolA, qty1, price1, qty1*price1)
 
@@ -240,11 +300,11 @@ func (u *SwapProcess) Process(ctx context.Context) error {
 	var qty2 float64
 	price2 := chain.priceAB
 	if chain.usedDirectAB {
-		qty2 = roundQty(math.Min(qty1, qtyAActual), precisionAB)
+		qty2 = swapRoundQtyDown(math.Min(qty1, qtyAActual), stepAB)
 	} else {
 		planB := qty1 / chain.priceAB
 		maxAffordB := qtyAActual / chain.priceAB
-		qty2 = roundQty(math.Min(planB, maxAffordB), precisionAB)
+		qty2 = swapRoundQtyDown(math.Min(planB, maxAffordB), stepAB)
 	}
 	if qty2 <= 0 {
 		return wrap.Errorf("шаг 2: после учёта баланса %s количество по паре %s обнулилось", best.baseA, chain.symbolAB)
@@ -288,7 +348,7 @@ func (u *SwapProcess) Process(ctx context.Context) error {
 	} else {
 		amountBActual = qty2
 	}
-	qty3 := roundQty(amountBActual, precisionB)
+	qty3 := swapRoundQtyDown(amountBActual, stepB)
 	price3 := chain.priceBUSDT
 	fmt.Printf("[DEBUG] Шаг 3: SELL %s @ bid | quantity=%.8f price=%.8f\n", symbolB, qty3, price3)
 
