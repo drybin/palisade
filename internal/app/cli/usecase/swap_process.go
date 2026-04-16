@@ -18,23 +18,38 @@ import (
 	"github.com/drybin/palisade/pkg/wrap"
 )
 
-// swapLotStep — шаг количества базового актива: baseSizePrecision с биржи, иначе 10^-baseAssetPrecision.
+// swapLotStep — шаг количества базового актива для округления вниз.
+// У MEXC baseSizePrecision часто дробный шаг (например "0.000001"); для части кросс-пар
+// приходит целое вроде "1" при baseAssetPrecision=2 (SOLBTC) — это не шаг 1 монета, тогда берём 10^-baseAssetPrecision.
 func swapLotStep(sym *mexc.SymbolDetail) (float64, error) {
 	if sym == nil {
 		return 0, wrap.Errorf("symbol detail is nil")
 	}
+
+	stepByDecimals := float64(0)
+	if sym.BaseAssetPrecision > 0 {
+		stepByDecimals = math.Pow(10, -sym.BaseAssetPrecision)
+	}
+
 	raw := strings.TrimSpace(sym.BaseSizePrecision)
 	if raw != "" {
-		step, err := strconv.ParseFloat(raw, 64)
+		parsed, err := strconv.ParseFloat(raw, 64)
 		if err != nil {
 			return 0, wrap.Errorf("parse baseSizePrecision %q for %s: %w", raw, sym.Symbol, err)
 		}
-		if step > 0 {
-			return step, nil
+		if parsed > 0 {
+			if parsed < 1 {
+				return parsed, nil
+			}
+			if stepByDecimals > 0 {
+				return stepByDecimals, nil
+			}
+			return parsed, nil
 		}
 	}
-	if sym.BaseAssetPrecision > 0 {
-		return math.Pow(10, -sym.BaseAssetPrecision), nil
+
+	if stepByDecimals > 0 {
+		return stepByDecimals, nil
 	}
 	return 0, wrap.Errorf("no valid lot step for %s (baseSizePrecision=%q baseAssetPrecision=%v)",
 		sym.Symbol, sym.BaseSizePrecision, sym.BaseAssetPrecision)
