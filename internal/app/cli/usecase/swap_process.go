@@ -312,7 +312,15 @@ func (u *SwapProcess) Process(ctx context.Context) error {
 	}
 	fmt.Printf("[DEBUG] Ордер 1 размещён: orderId=%s\n", order1.OrderID)
 
-	if err := u.waitOrderFilled(ctx, symbolA, order1.OrderID, "1"); err != nil {
+	if err := u.waitStepOrUnwindStep1(ctx, "1", symbolA, order1.OrderID, unwindStep1Params{
+		symbolUSDT:     symbolA,
+		baseAsset:      best.baseA,
+		buyPrice:       price1,
+		symA:           symA,
+		runID:          runID,
+		pendingSymbol:  symbolA,
+		pendingOrderID: order1.OrderID,
+	}); err != nil {
 		return err
 	}
 
@@ -370,7 +378,15 @@ func (u *SwapProcess) Process(ctx context.Context) error {
 	}
 	fmt.Printf("[DEBUG] Ордер 2 размещён: orderId=%s\n", order2.OrderID)
 
-	if err := u.waitOrderFilled(ctx, chain.symbolAB, order2.OrderID, "2"); err != nil {
+	if err := u.waitStepOrUnwindStep1(ctx, "2", chain.symbolAB, order2.OrderID, unwindStep1Params{
+		symbolUSDT:     symbolA,
+		baseAsset:      best.baseA,
+		buyPrice:       price1,
+		symA:           symA,
+		runID:          runID,
+		pendingSymbol:  chain.symbolAB,
+		pendingOrderID: order2.OrderID,
+	}); err != nil {
 		return err
 	}
 
@@ -400,7 +416,15 @@ func (u *SwapProcess) Process(ctx context.Context) error {
 	}
 	fmt.Printf("[DEBUG] Ордер 3 размещён: orderId=%s\n", order3.OrderID)
 
-	if err := u.waitOrderFilled(ctx, symbolB, order3.OrderID, "3"); err != nil {
+	if err := u.waitStepOrUnwindStep1(ctx, "3", symbolB, order3.OrderID, unwindStep1Params{
+		symbolUSDT:     symbolA,
+		baseAsset:      best.baseA,
+		buyPrice:       price1,
+		symA:           symA,
+		runID:          runID,
+		pendingSymbol:  symbolB,
+		pendingOrderID: order3.OrderID,
+	}); err != nil {
 		return err
 	}
 
@@ -413,27 +437,139 @@ func (u *SwapProcess) Process(ctx context.Context) error {
 	return nil
 }
 
-func (u *SwapProcess) waitOrderFilled(ctx context.Context, symbol, orderID, stepLabel string) error {
+// unwindStep1Params — разворот при таймауте: продать baseAsset за USDT по bid, если bid >= buyPrice шага 1.
+type unwindStep1Params struct {
+	symbolUSDT     string
+	baseAsset      string
+	buyPrice       float64
+	symA           *mexc.SymbolDetail
+	runID          int64
+	pendingSymbol  string
+	pendingOrderID string
+}
+
+// waitStepOrUnwindStep1 ждёт исполнения ордера; при таймауте отменяет его и при bid>=цене покупки шага 1 продаёт актив A.
+func (u *SwapProcess) waitStepOrUnwindStep1(ctx context.Context, stepLabel, pollSymbol, pollOrderID string, p unwindStep1Params) error {
+	timedOut, err := u.pollOrderUntilFilled(ctx, pollSymbol, pollOrderID, stepLabel)
+	if err != nil {
+		return err
+	}
+	if !timedOut {
+		return nil
+	}
+	unwound, uerr := u.tryUnwindStep1AfterTimeout(ctx, p)
+	if uerr != nil {
+		return uerr
+	}
+	if unwound {
+		fmt.Printf("\n=== Таймаут шага %s: разворот — %s продан по bid >= цене покупки ===\n", stepLabel, p.baseAsset)
+		return nil
+	}
+	return wrap.Errorf("step %s: таймаут ожидания исполнения ордера %s", stepLabel, pollOrderID)
+}
+
+func (u *SwapProcess) tryUnwindStep1AfterTimeout(ctx context.Context, p unwindStep1Params) (unwound bool, err error) {
+	if p.pendingOrderID != "" && p.pendingSymbol != "" {
+		_, cancelErr := u.repo.CancelOrder(p.pendingSymbol, p.pendingOrderID)
+		if cancelErr != nil {
+			fmt.Printf("[DEBUG] Отмена ордера %s перед разворотом: %v (продолжаем)\n", p.pendingOrderID, cancelErr)
+		} else {
+			fmt.Printf("[DEBUG] Ордер %s отменён перед разворотом\n", p.pendingOrderID)
+		}
+	}
+
+	bookRows, err := u.repo.GetAllBookTickers(ctx)
+	if err != nil {
+		return false, wrap.Errorf("разворот: book ticker: %w", err)
+	}
+	book := BuildSwapBookMap(bookRows)
+	q := book[p.symbolUSDT]
+	if q.Bid <= 0 {
+		fmt.Printf("[DEBUG] Разворот: нет bid по %s\n", p.symbolUSDT)
+		return false, nil
+	}
+	if q.Bid < p.buyPrice {
+		fmt.Printf("[DEBUG] Разворот не выполняем: bid %.8f < цены покупки шага 1 %.8f\n", q.Bid, p.buyPrice)
+		return false, nil
+	}
+
+	stepA, err := swapLotStep(p.symA)
+	if err != nil {
+		return false, err
+	}
+	acct, err := u.repo.GetBalance(ctx)
+	if err != nil {
+		return false, wrap.Errorf("разворот: баланс: %w", err)
+	}
+	balA, err := helpers.FindAssetBalance(acct.Balances, p.baseAsset)
+	if err != nil {
+		fmt.Printf("[DEBUG] Разворот: на балансе нет %s: %v\n", p.baseAsset, err)
+		return false, nil
+	}
+	qty := swapRoundQtyDown(balA.Free*swapIntermediateBuffer, stepA)
+	if qty <= 0 {
+		fmt.Printf("[DEBUG] Разворот: нет свободного %s для продажи (free=%.8f)\n", p.baseAsset, balA.Free)
+		return false, nil
+	}
+
+	sellPrice := q.Bid
+	fmt.Printf("[DEBUG] Разворот: SELL %s @ bid | quantity=%.8f price=%.8f\n", p.symbolUSDT, qty, sellPrice)
+	unwindOrder, err := u.repo.NewOrder(model.OrderParams{
+		Symbol:           p.symbolUSDT,
+		Side:             order.SELL,
+		OrderType:        order.LIMIT,
+		Quantity:         qty,
+		Price:            sellPrice,
+		NewClientOrderId: fmt.Sprintf("swap_%d_unwind_%s", p.runID, p.baseAsset),
+	})
+	if err != nil {
+		return false, wrap.Errorf("разворот: SELL %s: %w", p.symbolUSDT, err)
+	}
+	if err := u.waitOrderFilled(ctx, p.symbolUSDT, unwindOrder.OrderID, "unwind"); err != nil {
+		return false, err
+	}
+	fmt.Printf("[DEBUG] Разворот исполнен: orderId=%s\n", unwindOrder.OrderID)
+	return true, nil
+}
+
+// pollOrderUntilFilled возвращает timedOut=true, если истёк дедлайн без FILLED.
+func (u *SwapProcess) pollOrderUntilFilled(ctx context.Context, symbol, orderID, stepLabel string) (timedOut bool, err error) {
 	deadline := time.Now().Add(orderFillWaitTimeout)
 	for time.Now().Before(deadline) {
+		select {
+		case <-ctx.Done():
+			return false, ctx.Err()
+		default:
+		}
 		time.Sleep(orderFillPollInterval)
 		q, err := u.repo.GetOrderQuery(symbol, orderID)
 		if err != nil {
-			return wrap.Errorf("step %s query order: %w", stepLabel, err)
+			return false, wrap.Errorf("step %s query order: %w", stepLabel, err)
 		}
 		if q == nil {
 			fmt.Printf("[DEBUG] Шаг %s: ордер %s не найден (возможно уже исполнен)\n", stepLabel, orderID)
-			return nil
+			return false, nil
 		}
 		fmt.Printf("[DEBUG] Шаг %s: статус=%s executedQty=%s\n", stepLabel, q.Status, q.ExecutedQty)
 		if q.Status == "FILLED" {
-			return nil
+			return false, nil
 		}
 		if q.Status == "CANCELED" || q.Status == "REJECTED" || q.Status == "EXPIRED" {
-			return wrap.Errorf("step %s: ордер в статусе %s", stepLabel, q.Status)
+			return false, wrap.Errorf("step %s: ордер в статусе %s", stepLabel, q.Status)
 		}
 	}
-	return wrap.Errorf("step %s: таймаут ожидания исполнения ордера %s", stepLabel, orderID)
+	return true, nil
+}
+
+func (u *SwapProcess) waitOrderFilled(ctx context.Context, symbol, orderID, stepLabel string) error {
+	timedOut, err := u.pollOrderUntilFilled(ctx, symbol, orderID, stepLabel)
+	if err != nil {
+		return err
+	}
+	if timedOut {
+		return wrap.Errorf("step %s: таймаут ожидания исполнения ордера %s", stepLabel, orderID)
+	}
+	return nil
 }
 
 func (u *SwapProcess) findSymbolDetail(info *mexc.SymbolInfo, symbol string) *mexc.SymbolDetail {
