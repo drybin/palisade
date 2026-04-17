@@ -21,9 +21,27 @@ import (
 // swapLotStep — шаг количества базового актива для округления вниз.
 // У MEXC baseSizePrecision часто дробный шаг (например "0.000001"); для части кросс-пар
 // приходит целое вроде "1" при baseAssetPrecision=2 (SOLBTC) — это не шаг 1 монета, тогда берём 10^-baseAssetPrecision.
+// Если baseAssetPrecision в ответе 0, baseSizePrecision "1" ошибочно даёт шаг 1.0 — поэтому сначала LOT_SIZE.stepSize.
 func swapLotStep(sym *mexc.SymbolDetail) (float64, error) {
 	if sym == nil {
 		return 0, wrap.Errorf("symbol detail is nil")
+	}
+
+	for i := range sym.Filters {
+		if sym.Filters[i].FilterType != "LOT_SIZE" {
+			continue
+		}
+		raw := strings.TrimSpace(sym.Filters[i].StepSize)
+		if raw == "" {
+			continue
+		}
+		step, err := strconv.ParseFloat(raw, 64)
+		if err != nil {
+			continue
+		}
+		if step > 0 {
+			return step, nil
+		}
 	}
 
 	stepByDecimals := float64(0)

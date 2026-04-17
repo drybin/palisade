@@ -598,11 +598,7 @@ func mapCoinToDomainModel(c palisade_database.Coin) (*mexc.SymbolDetail, error) 
 		QuoteAmountPrecision:     fmt.Sprintf("%f", c.Quoteamountprecision),
 		BaseSizePrecision:        strconv.FormatFloat(c.Basesizeprecision, 'f', -1, 64),
 		Permissions:              c.Permissions,
-		Filters: []struct {
-			FilterType        string `json:"filterType"`
-			BidMultiplierUp   string `json:"bidMultiplierUp"`
-			AskMultiplierDown string `json:"askMultiplierDown"`
-		}{},
+		Filters: []mexc.SymbolFilter{},
 		MaxQuoteAmount:             strconv.Itoa(c.Maxquoteamount),
 		MakerCommission:            strconv.FormatFloat(c.Makercommission, 'f', -1, 64),
 		TakerCommission:            strconv.FormatFloat(c.Takercommission, 'f', -1, 64),

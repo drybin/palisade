@@ -35,3 +35,22 @@ func TestSwapLotStep_fractionalBaseSizePrecision(t *testing.T) {
 		t.Fatalf("want step 0.000001, got %g", step)
 	}
 }
+
+func TestSwapLotStep_prefersLOT_SIZE_whenBaseFieldsWrong(t *testing.T) {
+	// MEXC sometimes yields baseSizePrecision "1" with baseAssetPrecision 0; legacy logic would use step 1.0.
+	s := &mexc.SymbolDetail{
+		Symbol:              "SOLBTC",
+		BaseSizePrecision:   "1",
+		BaseAssetPrecision:  0,
+		Filters: []mexc.SymbolFilter{
+			{FilterType: "LOT_SIZE", StepSize: "0.01", MinQty: "0.01"},
+		},
+	}
+	step, err := swapLotStep(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if step != 0.01 {
+		t.Fatalf("want LOT_SIZE step 0.01, got %g", step)
+	}
+}

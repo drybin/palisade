@@ -10,6 +10,16 @@ type SymbolInfo struct {
 	Symbols         []SymbolDetail `json:"symbols"`
 }
 
+// SymbolFilter is one entry of exchangeInfo.symbols[].filters (MEXC / Binance-compatible).
+type SymbolFilter struct {
+	FilterType        string `json:"filterType"`
+	BidMultiplierUp   string `json:"bidMultiplierUp"`
+	AskMultiplierDown string `json:"askMultiplierDown"`
+	StepSize          string `json:"stepSize"`
+	MinQty            string `json:"minQty"`
+	MaxQty            string `json:"maxQty"`
+}
+
 type SymbolDetail struct {
 	Symbol                   string   `json:"symbol"`
 	Status                   string   `json:"status"`
@@ -26,11 +36,7 @@ type SymbolDetail struct {
 	QuoteAmountPrecision     string   `json:"quoteAmountPrecision"`
 	BaseSizePrecision        string   `json:"baseSizePrecision"`
 	Permissions              []string `json:"permissions"`
-	Filters                  []struct {
-		FilterType        string `json:"filterType"`
-		BidMultiplierUp   string `json:"bidMultiplierUp"`
-		AskMultiplierDown string `json:"askMultiplierDown"`
-	} `json:"filters"`
+	Filters                  []SymbolFilter `json:"filters"`
 	MaxQuoteAmount             string    `json:"maxQuoteAmount"`
 	MakerCommission            string    `json:"makerCommission"`
 	TakerCommission            string    `json:"takerCommission"`
