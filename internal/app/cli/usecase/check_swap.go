@@ -31,7 +31,13 @@ func (u *CheckSwap) Process(ctx context.Context, quiet bool) error {
         return wrap.Errorf("failed to get book tickers: %w", err)
     }
     book := BuildSwapBookMap(bookRows)
-    
+
+    exchangeInfoAll, err := u.repo.GetExchangeInfoAll(ctx)
+    if err != nil {
+        return wrap.Errorf("exchange info all: %w", err)
+    }
+    symbolIndex := BuildSymbolDetailIndex(exchangeInfoAll)
+
     // Тип и расчёт allChains вынесены для использования в обоих режимах
     type chainProfit struct {
         baseA, baseB string
@@ -56,9 +62,14 @@ func (u *CheckSwap) Process(ctx context.Context, quiet bool) error {
             if !allowedHubs[baseA] && !allowedHubs[baseB] {
                 continue
             }
-            coinA := mexc.SymbolDetail{BaseAsset: baseA, Symbol: baseA + "USDT", QuoteAsset: "USDT"}
-            coinB := mexc.SymbolDetail{BaseAsset: baseB, Symbol: baseB + "USDT", QuoteAsset: "USDT"}
-            res, ok := calcSwapChainFromBook(book, &coinA, &coinB)
+            symbolAUSDT := baseA + "USDT"
+            symbolBUSDT := baseB + "USDT"
+            coinA := mexc.SymbolDetail{BaseAsset: baseA, Symbol: symbolAUSDT, QuoteAsset: "USDT"}
+            coinB := mexc.SymbolDetail{BaseAsset: baseB, Symbol: symbolBUSDT, QuoteAsset: "USDT"}
+            res, ok := calcSwapChainFromBook(book, &coinA, &coinB, &SwapChainMeta{
+                Index:       symbolIndex,
+                InterBuffer: swapIntermediateBuffer,
+            })
             if !ok {
                 continue
             }
@@ -128,7 +139,7 @@ func (u *CheckSwap) Process(ctx context.Context, quiet bool) error {
     
     fmt.Printf("--- Дебаг цепочки USDT -> %s -> %s -> USDT ---\n\n", baseA, baseB)
     
-    res, ok := calcSwapChainFromBook(book, &coinA, &coinB)
+    res, ok := calcSwapChainFromBook(book, &coinA, &coinB, nil)
     if !ok {
         // Выводим, чего не хватает
         fmt.Printf("Цепочка USDT -> %s -> %s -> USDT: не хватает данных.\n", baseA, baseB)

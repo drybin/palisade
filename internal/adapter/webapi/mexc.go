@@ -113,6 +113,24 @@ func (m *MexcWebapi) GetSymbolInfo(ctx context.Context, symbol string) (*mexc.Sy
 	return &result, nil
 }
 
+// GetExchangeInfoAll возвращает exchangeInfo по всем символам (без фильтра symbol).
+func (m *MexcWebapi) GetExchangeInfoAll(ctx context.Context) (*mexc.SymbolInfo, error) {
+	_ = ctx
+	res := m.spot.ExchangeInfo(map[string]string{})
+	bytes, err := json.Marshal(res)
+	if err != nil {
+		return nil, wrap.Errorf("failed to marshal exchange info: %w", err)
+	}
+
+	result := mexc.SymbolInfo{}
+	err = json.Unmarshal(bytes, &result)
+	if err != nil {
+		return nil, wrap.Errorf("failed to unmarshal exchange info: %w", err)
+	}
+
+	return &result, nil
+}
+
 func (m *MexcWebapi) NewOrder(
 	orderParams model.OrderParams,
 ) (*mexc.PlaceOrderResult, error) {

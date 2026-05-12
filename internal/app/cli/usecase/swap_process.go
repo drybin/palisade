@@ -131,6 +131,13 @@ func (u *SwapProcess) Process(ctx context.Context) error {
 	}
 	fmt.Printf("[DEBUG] В БД символов с IsSpotTradingAllowed: %d\n\n", len(symbolsAllowed))
 
+	exchangeInfoAll, err := u.repo.GetExchangeInfoAll(ctx)
+	if err != nil {
+		return wrap.Errorf("exchange info all: %w", err)
+	}
+	symbolIndex := BuildSymbolDetailIndex(exchangeInfoAll)
+	fmt.Printf("[DEBUG] ExchangeInfo: символов в индексе: %d\n\n", len(symbolIndex))
+
 	// --- 2. Строим все цепочки USDT -> A -> B -> USDT (через BTC/ETH/USDC), только если все 3 пары в списке разрешённых ---
 	allowedHubs := map[string]bool{"BTC": true, "ETH": true, "USDC": true}
 	var baseAssets []string
@@ -163,7 +170,10 @@ func (u *SwapProcess) Process(ctx context.Context) error {
 			}
 			coinA := mexc.SymbolDetail{BaseAsset: baseA, Symbol: symbolAUSDT, QuoteAsset: "USDT"}
 			coinB := mexc.SymbolDetail{BaseAsset: baseB, Symbol: symbolBUSDT, QuoteAsset: "USDT"}
-			res, ok := calcSwapChainFromBook(book, &coinA, &coinB)
+			res, ok := calcSwapChainFromBook(book, &coinA, &coinB, &SwapChainMeta{
+				Index:       symbolIndex,
+				InterBuffer: swapIntermediateBuffer,
+			})
 			if !ok {
 				continue
 			}
@@ -199,7 +209,10 @@ func (u *SwapProcess) Process(ctx context.Context) error {
 
 	coinA := mexc.SymbolDetail{BaseAsset: best.baseA, Symbol: best.baseA + "USDT", QuoteAsset: "USDT"}
 	coinB := mexc.SymbolDetail{BaseAsset: best.baseB, Symbol: best.baseB + "USDT", QuoteAsset: "USDT"}
-	chain, ok := calcSwapChainFromBook(book, &coinA, &coinB)
+	chain, ok := calcSwapChainFromBook(book, &coinA, &coinB, &SwapChainMeta{
+		Index:       symbolIndex,
+		InterBuffer: swapIntermediateBuffer,
+	})
 	if !ok {
 		return wrap.Errorf("chain %s -> %s recalc failed", best.baseA, best.baseB)
 	}
@@ -262,19 +275,23 @@ func (u *SwapProcess) Process(ctx context.Context) error {
 		return wrap.Errorf("%s: %w", chain.symbolAB, err)
 	}
 
+	feeA := swapTakerFeeRate(symA)
+	feeAB := swapTakerFeeRate(symAB)
+
 	qty1 := swapRoundQtyDown(amountInUSDT/chain.priceAUSDT, stepA)
 	price1 := chain.priceAUSDT
 	if qty1 <= 0 {
 		return wrap.Errorf("шаг 1: количество после округления обнулилось (%s step=%g)", symbolA, stepA)
 	}
 
-	// Preflight шагов 2–3 по ожидаемому балансу после шага 1 (без math.Floor(qty) при невалидном step).
-	qtyAExpected := qty1 * swapIntermediateBuffer
+	// Preflight шагов 2–3 по той же модели объёмов, что и в swap_chain.
+	qtyANet := qty1 * (1.0 - feeA)
+	qtyAExpected := qtyANet * swapIntermediateBuffer
 	var qty2pref float64
 	if chain.usedDirectAB {
-		qty2pref = swapRoundQtyDown(math.Min(qty1, qtyAExpected), stepAB)
+		qty2pref = swapRoundQtyDown(math.Min(qtyANet, qtyAExpected), stepAB)
 	} else {
-		planB := qty1 / chain.priceAB
+		planB := qtyANet / chain.priceAB
 		maxAffordB := qtyAExpected / chain.priceAB
 		qty2pref = swapRoundQtyDown(math.Min(planB, maxAffordB), stepAB)
 	}
@@ -284,9 +301,9 @@ func (u *SwapProcess) Process(ctx context.Context) error {
 	}
 	var amountBpref float64
 	if chain.usedDirectAB {
-		amountBpref = qty2pref * chain.priceAB
+		amountBpref = qty2pref * chain.priceAB * (1.0 - feeAB)
 	} else {
-		amountBpref = qty2pref
+		amountBpref = qty2pref * (1.0 - feeAB)
 	}
 	qty3pref := swapRoundQtyDown(amountBpref, stepB)
 	if qty3pref <= 0 {
@@ -391,14 +408,21 @@ func (u *SwapProcess) Process(ctx context.Context) error {
 	}
 
 	// --- Шаг 3: Лимитный ордер SELL B за USDT (количество B получено на шаге 2) ---
-	var amountBActual float64
-	if chain.usedDirectAB {
-		amountBActual = qty2 * chain.priceAB
-	} else {
-		amountBActual = qty2
+	acctAfter2, err := u.repo.GetBalance(ctx)
+	if err != nil {
+		return wrap.Errorf("balance after step 2: %w", err)
 	}
-	qty3 := swapRoundQtyDown(amountBActual, stepB)
+	balB, err := helpers.FindAssetBalance(acctAfter2.Balances, best.baseB)
+	if err != nil {
+		return err
+	}
+	qtyBActual := balB.Free * swapIntermediateBuffer
+	qty3 := swapRoundQtyDown(qtyBActual, stepB)
+	if qty3 <= 0 {
+		return wrap.Errorf("шаг 3: после учёта баланса %s количество обнулилось", best.baseB)
+	}
 	price3 := chain.priceBUSDT
+	fmt.Printf("[DEBUG] Доступно %s для шага 3 (с запасом): %.8f (free=%.8f)\n", best.baseB, qtyBActual, balB.Free)
 	fmt.Printf("[DEBUG] Шаг 3: SELL %s @ bid | quantity=%.8f price=%.8f\n", symbolB, qty3, price3)
 
 	clientOrderId3 := fmt.Sprintf("swap_%d_3_%s", runID, best.baseB)
@@ -580,4 +604,3 @@ func (u *SwapProcess) findSymbolDetail(info *mexc.SymbolInfo, symbol string) *me
 	}
 	return nil
 }
-
