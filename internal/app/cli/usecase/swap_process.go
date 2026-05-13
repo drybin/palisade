@@ -171,8 +171,9 @@ func (u *SwapProcess) Process(ctx context.Context) error {
 			coinA := mexc.SymbolDetail{BaseAsset: baseA, Symbol: symbolAUSDT, QuoteAsset: "USDT"}
 			coinB := mexc.SymbolDetail{BaseAsset: baseB, Symbol: symbolBUSDT, QuoteAsset: "USDT"}
 			res, ok := calcSwapChainFromBook(book, &coinA, &coinB, &SwapChainMeta{
-				Index:       symbolIndex,
-				InterBuffer: swapIntermediateBuffer,
+				Index:          symbolIndex,
+				InterBuffer:    swapIntermediateBuffer,
+				RequireRealism: true,
 			})
 			if !ok {
 				continue
@@ -210,8 +211,9 @@ func (u *SwapProcess) Process(ctx context.Context) error {
 	coinA := mexc.SymbolDetail{BaseAsset: best.baseA, Symbol: best.baseA + "USDT", QuoteAsset: "USDT"}
 	coinB := mexc.SymbolDetail{BaseAsset: best.baseB, Symbol: best.baseB + "USDT", QuoteAsset: "USDT"}
 	chain, ok := calcSwapChainFromBook(book, &coinA, &coinB, &SwapChainMeta{
-		Index:       symbolIndex,
-		InterBuffer: swapIntermediateBuffer,
+		Index:          symbolIndex,
+		InterBuffer:    swapIntermediateBuffer,
+		RequireRealism: true,
 	})
 	if !ok {
 		return wrap.Errorf("chain %s -> %s recalc failed", best.baseA, best.baseB)

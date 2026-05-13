@@ -86,3 +86,39 @@ func TestCalcSwapChainFromBook_feesLowerProfit(t *testing.T) {
 		t.Fatalf("with fees want lower profit: noFee=%g withFee=%g", noFee.profitPercent, withFee.profitPercent)
 	}
 }
+
+func TestCalcSwapChainFromBook_requireRealismRejectsInvalidLotStep(t *testing.T) {
+	book := map[string]swapBookQuote{
+		"BDXUSDT": {Bid: 1.01, Ask: 1.02},
+		"BTCUSDT": {Bid: 78000, Ask: 78100},
+		"BDXBTC":  {Bid: 0.0000133, Ask: 0.0000134},
+	}
+	coinA := &mexc.SymbolDetail{BaseAsset: "BDX", Symbol: "BDXUSDT", QuoteAsset: "USDT"}
+	coinB := &mexc.SymbolDetail{BaseAsset: "BTC", Symbol: "BTCUSDT", QuoteAsset: "USDT"}
+
+	idx := map[string]*mexc.SymbolDetail{
+		"BDXUSDT": testSymbolWithLotAndTaker("BDXUSDT", "0.1", "0"),
+		"BTCUSDT": testSymbolWithLotAndTaker("BTCUSDT", "0.000001", "0"),
+		"BDXBTC": {
+			Symbol:             "BDXBTC",
+			BaseSizePrecision:  "0",
+			BaseAssetPrecision: 0,
+		},
+	}
+
+	soft, ok := calcSwapChainFromBook(book, coinA, coinB, &SwapChainMeta{Index: idx, InterBuffer: 0.999})
+	if !ok {
+		t.Fatal("soft realism should fall back to continuous")
+	}
+	strict, ok := calcSwapChainFromBook(book, coinA, coinB, &SwapChainMeta{
+		Index:          idx,
+		InterBuffer:    0.999,
+		RequireRealism: true,
+	})
+	if ok {
+		t.Fatalf("strict realism should reject invalid lot step, got %+v", strict)
+	}
+	if soft.symbolAB == "" {
+		t.Fatal("soft fallback should still return continuous route")
+	}
+}

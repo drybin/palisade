@@ -17,8 +17,9 @@ const swapChainDefaultInterBuffer = 0.999
 // SwapChainMeta задаёт индекс exchangeInfo по символам; из него берутся шаг лота и taker для трёх пар цепочки.
 // Если nil или в Index нет одной из пар (AUSDT, BUSDT, AB после роутинга), используется непрерывная модель.
 type SwapChainMeta struct {
-	Index       map[string]*mexc.SymbolDetail
-	InterBuffer float64
+	Index          map[string]*mexc.SymbolDetail
+	InterBuffer    float64
+	RequireRealism bool
 }
 
 // swapTakerFeeRate парсит TakerCommission символа (доля 0…1); при ошибке — swapDefaultTakerFee.
@@ -152,6 +153,9 @@ func calcSwapChainFromBook(book map[string]swapBookQuote, coinA, coinB *mexc.Sym
 	sb := meta.Index[symbolBUSDT]
 	sab := meta.Index[res.symbolAB]
 	if sa == nil || sb == nil || sab == nil {
+		if meta.RequireRealism {
+			return swapChainResult{}, false
+		}
 		return res, true
 	}
 
@@ -159,6 +163,9 @@ func calcSwapChainFromBook(book map[string]swapBookQuote, coinA, coinB *mexc.Sym
 	stepB, e2 := swapLotStep(sb)
 	stepAB, e3 := swapLotStep(sab)
 	if e1 != nil || e2 != nil || e3 != nil {
+		if meta.RequireRealism {
+			return swapChainResult{}, false
+		}
 		return res, true
 	}
 
@@ -174,6 +181,9 @@ func calcSwapChainFromBook(book map[string]swapBookQuote, coinA, coinB *mexc.Sym
 	real, applied := applySwapChainRealism(res, stepA, stepAB, stepB, buf, fA, fAB, fB)
 	if applied {
 		return real, true
+	}
+	if meta.RequireRealism {
+		return swapChainResult{}, false
 	}
 	return res, true
 }
