@@ -521,9 +521,33 @@ func (u StateRepository) GetTradeLogManualById(ctx context.Context, id int) (*re
 
 func (u StateRepository) GetNextTradeIdManual(ctx context.Context) (int, error) {
 	db := palisade_database.New(u.Postgree)
-	maxID, err := db.GetLastTradeIdManual(ctx)
+	lastTradeId, err := db.GetLastTradeIdManual(ctx)
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return 201, nil
+		}
 		return 0, wrap.Errorf("failed to get last manual trade id: %w", err)
+	}
+	if lastTradeId == nil {
+		return 201, nil
+	}
+	var maxID int
+	switch v := lastTradeId.(type) {
+	case int64:
+		maxID = int(v)
+	case int32:
+		maxID = int(v)
+	case int:
+		maxID = v
+	case float64:
+		maxID = int(v)
+	default:
+		maxIDStr := fmt.Sprintf("%v", lastTradeId)
+		parsed, parseErr := strconv.Atoi(maxIDStr)
+		if parseErr != nil {
+			return 0, wrap.Errorf("failed to convert last manual trade id to int: %w", parseErr)
+		}
+		maxID = parsed
 	}
 	if maxID < 200 {
 		maxID = 200

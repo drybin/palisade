@@ -8,7 +8,20 @@ package palisade_database
 import (
 	"context"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
+
+const countMarketDailyBars = `-- name: CountMarketDailyBars :one
+SELECT COUNT(*)::bigint FROM market_daily_bar WHERE symbol = $1
+`
+
+func (q *Queries) CountMarketDailyBars(ctx context.Context, symbol string) (int64, error) {
+	row := q.db.QueryRow(ctx, countMarketDailyBars, symbol)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
 
 const getCoinInfo = `-- name: GetCoinInfo :one
 SELECT id, date, symbol, status, baseasset, baseassetprecision, quoteasset, quoteprecision, quoteassetprecision, basecommissionprecision, quotecommissionprecision, ordertypes, isspottradingallowed, ismargintradingallowed, quoteamountprecision, basesizeprecision, permissions, maxquoteamount, makercommission, takercommission, quoteamountprecisionmarket, maxquoteamountmarket, fullname, tradesidetype, ispalisade, lastcheck, support, resistance, rangevalue, rangepercent, avgprice, volatility, maxdrawdown, maxrise FROM coins
@@ -328,6 +341,20 @@ func (q *Queries) GetCountLogsByCoin(ctx context.Context, arg GetCountLogsByCoin
 	return count, err
 }
 
+const getLastMinuteBarOpenTime = `-- name: GetLastMinuteBarOpenTime :one
+SELECT open_time FROM market_minute_bar
+WHERE symbol = $1
+ORDER BY open_time DESC
+LIMIT 1
+`
+
+func (q *Queries) GetLastMinuteBarOpenTime(ctx context.Context, symbol string) (time.Time, error) {
+	row := q.db.QueryRow(ctx, getLastMinuteBarOpenTime, symbol)
+	var open_time time.Time
+	err := row.Scan(&open_time)
+	return open_time, err
+}
+
 const getLastTradeId = `-- name: GetLastTradeId :one
 SELECT MAX(id) FROM trade_log
 `
@@ -337,6 +364,17 @@ func (q *Queries) GetLastTradeId(ctx context.Context) (interface{}, error) {
 	var max interface{}
 	err := row.Scan(&max)
 	return max, err
+}
+
+const getLastTradeIdManual = `-- name: GetLastTradeIdManual :one
+SELECT COALESCE(MAX(id), 0) FROM trade_log_manual
+`
+
+func (q *Queries) GetLastTradeIdManual(ctx context.Context) (interface{}, error) {
+	row := q.db.QueryRow(ctx, getLastTradeIdManual)
+	var coalesce interface{}
+	err := row.Scan(&coalesce)
+	return coalesce, err
 }
 
 const getOpenOrders = `-- name: GetOpenOrders :many
@@ -371,6 +409,187 @@ func (q *Queries) GetOpenOrders(ctx context.Context) ([]TradeLog, error) {
 			&i.OrderidSell,
 			&i.Uplevel,
 			&i.Downlevel,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getOpenOrdersManual = `-- name: GetOpenOrdersManual :many
+SELECT id, open_date, deal_date, close_date, cancel_date, open_balance, close_balance, symbol, buy_price, sell_price, amount, orderid, orderid_sell, uplevel, downlevel FROM trade_log_manual
+WHERE 
+    close_date IS NULL
+    AND cancel_date IS NULL
+`
+
+func (q *Queries) GetOpenOrdersManual(ctx context.Context) ([]TradeLogManual, error) {
+	rows, err := q.db.Query(ctx, getOpenOrdersManual)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []TradeLogManual
+	for rows.Next() {
+		var i TradeLogManual
+		if err := rows.Scan(
+			&i.ID,
+			&i.OpenDate,
+			&i.DealDate,
+			&i.CloseDate,
+			&i.CancelDate,
+			&i.OpenBalance,
+			&i.CloseBalance,
+			&i.Symbol,
+			&i.BuyPrice,
+			&i.SellPrice,
+			&i.Amount,
+			&i.Orderid,
+			&i.OrderidSell,
+			&i.Uplevel,
+			&i.Downlevel,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getTradeLogManualById = `-- name: GetTradeLogManualById :one
+SELECT id, open_date, deal_date, close_date, cancel_date, open_balance, close_balance, symbol, buy_price, sell_price, amount, orderid, orderid_sell, uplevel, downlevel FROM trade_log_manual WHERE id = $1
+`
+
+func (q *Queries) GetTradeLogManualById(ctx context.Context, id int) (TradeLogManual, error) {
+	row := q.db.QueryRow(ctx, getTradeLogManualById, id)
+	var i TradeLogManual
+	err := row.Scan(
+		&i.ID,
+		&i.OpenDate,
+		&i.DealDate,
+		&i.CloseDate,
+		&i.CancelDate,
+		&i.OpenBalance,
+		&i.CloseBalance,
+		&i.Symbol,
+		&i.BuyPrice,
+		&i.SellPrice,
+		&i.Amount,
+		&i.Orderid,
+		&i.OrderidSell,
+		&i.Uplevel,
+		&i.Downlevel,
+	)
+	return i, err
+}
+
+const getTrendRetestState = `-- name: GetTrendRetestState :one
+SELECT symbol, sma_period, day_utc, wait_retest, retest_until, last_processed_open_time FROM trend_retest_state
+WHERE symbol = $1 AND sma_period = $2 AND day_utc = $3
+`
+
+type GetTrendRetestStateParams struct {
+	Symbol    string
+	SmaPeriod int
+	DayUtc    pgtype.Date
+}
+
+func (q *Queries) GetTrendRetestState(ctx context.Context, arg GetTrendRetestStateParams) (TrendRetestState, error) {
+	row := q.db.QueryRow(ctx, getTrendRetestState, arg.Symbol, arg.SmaPeriod, arg.DayUtc)
+	var i TrendRetestState
+	err := row.Scan(
+		&i.Symbol,
+		&i.SmaPeriod,
+		&i.DayUtc,
+		&i.WaitRetest,
+		&i.RetestUntil,
+		&i.LastProcessedOpenTime,
+	)
+	return i, err
+}
+
+const insertTrendSignalSent = `-- name: InsertTrendSignalSent :exec
+INSERT INTO trend_signal_sent (symbol, sma_period, day_utc, signal_kind)
+VALUES ($1, $2, $3, $4)
+`
+
+type InsertTrendSignalSentParams struct {
+	Symbol     string
+	SmaPeriod  int
+	DayUtc     pgtype.Date
+	SignalKind string
+}
+
+func (q *Queries) InsertTrendSignalSent(ctx context.Context, arg InsertTrendSignalSentParams) error {
+	_, err := q.db.Exec(ctx, insertTrendSignalSent,
+		arg.Symbol,
+		arg.SmaPeriod,
+		arg.DayUtc,
+		arg.SignalKind,
+	)
+	return err
+}
+
+const listMarketDailyBars = `-- name: ListMarketDailyBars :many
+SELECT symbol, day_utc, close FROM market_daily_bar
+WHERE symbol = $1
+ORDER BY day_utc ASC
+`
+
+func (q *Queries) ListMarketDailyBars(ctx context.Context, symbol string) ([]MarketDailyBar, error) {
+	rows, err := q.db.Query(ctx, listMarketDailyBars, symbol)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []MarketDailyBar
+	for rows.Next() {
+		var i MarketDailyBar
+		if err := rows.Scan(&i.Symbol, &i.DayUtc, &i.Close); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listMarketMinuteBarsFrom = `-- name: ListMarketMinuteBarsFrom :many
+SELECT symbol, open_time, open, high, low, close FROM market_minute_bar
+WHERE symbol = $1 AND open_time >= $2
+ORDER BY open_time ASC
+`
+
+type ListMarketMinuteBarsFromParams struct {
+	Symbol   string
+	OpenTime time.Time
+}
+
+func (q *Queries) ListMarketMinuteBarsFrom(ctx context.Context, arg ListMarketMinuteBarsFromParams) ([]MarketMinuteBar, error) {
+	rows, err := q.db.Query(ctx, listMarketMinuteBarsFrom, arg.Symbol, arg.OpenTime)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []MarketMinuteBar
+	for rows.Next() {
+		var i MarketMinuteBar
+		if err := rows.Scan(
+			&i.Symbol,
+			&i.OpenTime,
+			&i.Open,
+			&i.High,
+			&i.Low,
+			&i.Close,
 		); err != nil {
 			return nil, err
 		}
@@ -600,6 +819,99 @@ func (q *Queries) SaveTradeLog(ctx context.Context, arg SaveTradeLogParams) (Tra
 	return i, err
 }
 
+const saveTradeLogManual = `-- name: SaveTradeLogManual :one
+INSERT INTO trade_log_manual (
+   open_date,
+   open_balance,
+   symbol,
+   buy_price,
+   amount,
+   orderId,
+   upLevel,
+   downLevel
+   )
+   VALUES (
+           $1,
+           $2,
+           $3,
+           $4,
+           $5,
+           $6,
+           $7,
+           $8
+   )
+   RETURNING id, open_date, deal_date, close_date, cancel_date, open_balance, close_balance, symbol, buy_price, sell_price, amount, orderid, orderid_sell, uplevel, downlevel
+`
+
+type SaveTradeLogManualParams struct {
+	OpenDate    time.Time
+	OpenBalance float64
+	Symbol      string
+	BuyPrice    float64
+	Amount      float64
+	Orderid     string
+	Uplevel     float64
+	Downlevel   float64
+}
+
+func (q *Queries) SaveTradeLogManual(ctx context.Context, arg SaveTradeLogManualParams) (TradeLogManual, error) {
+	row := q.db.QueryRow(ctx, saveTradeLogManual,
+		arg.OpenDate,
+		arg.OpenBalance,
+		arg.Symbol,
+		arg.BuyPrice,
+		arg.Amount,
+		arg.Orderid,
+		arg.Uplevel,
+		arg.Downlevel,
+	)
+	var i TradeLogManual
+	err := row.Scan(
+		&i.ID,
+		&i.OpenDate,
+		&i.DealDate,
+		&i.CloseDate,
+		&i.CancelDate,
+		&i.OpenBalance,
+		&i.CloseBalance,
+		&i.Symbol,
+		&i.BuyPrice,
+		&i.SellPrice,
+		&i.Amount,
+		&i.Orderid,
+		&i.OrderidSell,
+		&i.Uplevel,
+		&i.Downlevel,
+	)
+	return i, err
+}
+
+const trendSignalWasSent = `-- name: TrendSignalWasSent :one
+SELECT EXISTS(
+    SELECT 1 FROM trend_signal_sent
+    WHERE symbol = $1 AND sma_period = $2 AND day_utc = $3 AND signal_kind = $4
+) AS sent
+`
+
+type TrendSignalWasSentParams struct {
+	Symbol     string
+	SmaPeriod  int
+	DayUtc     pgtype.Date
+	SignalKind string
+}
+
+func (q *Queries) TrendSignalWasSent(ctx context.Context, arg TrendSignalWasSentParams) (bool, error) {
+	row := q.db.QueryRow(ctx, trendSignalWasSent,
+		arg.Symbol,
+		arg.SmaPeriod,
+		arg.DayUtc,
+		arg.SignalKind,
+	)
+	var sent bool
+	err := row.Scan(&sent)
+	return sent, err
+}
+
 const updateCancelDateTradeLog = `-- name: UpdateCancelDateTradeLog :exec
 UPDATE trade_log
 SET cancel_date = $1
@@ -616,6 +928,22 @@ func (q *Queries) UpdateCancelDateTradeLog(ctx context.Context, arg UpdateCancel
 	return err
 }
 
+const updateCancelDateTradeLogManual = `-- name: UpdateCancelDateTradeLogManual :exec
+UPDATE trade_log_manual
+SET cancel_date = $1
+WHERE id = $2
+`
+
+type UpdateCancelDateTradeLogManualParams struct {
+	CancelDate *time.Time
+	ID         int
+}
+
+func (q *Queries) UpdateCancelDateTradeLogManual(ctx context.Context, arg UpdateCancelDateTradeLogManualParams) error {
+	_, err := q.db.Exec(ctx, updateCancelDateTradeLogManual, arg.CancelDate, arg.ID)
+	return err
+}
+
 const updateDealDateTradeLog = `-- name: UpdateDealDateTradeLog :exec
 UPDATE trade_log
 SET deal_date = $1
@@ -629,6 +957,22 @@ type UpdateDealDateTradeLogParams struct {
 
 func (q *Queries) UpdateDealDateTradeLog(ctx context.Context, arg UpdateDealDateTradeLogParams) error {
 	_, err := q.db.Exec(ctx, updateDealDateTradeLog, arg.DealDate, arg.ID)
+	return err
+}
+
+const updateDealDateTradeLogManual = `-- name: UpdateDealDateTradeLogManual :exec
+UPDATE trade_log_manual
+SET deal_date = $1
+WHERE id = $2
+`
+
+type UpdateDealDateTradeLogManualParams struct {
+	DealDate *time.Time
+	ID       int
+}
+
+func (q *Queries) UpdateDealDateTradeLogManual(ctx context.Context, arg UpdateDealDateTradeLogManualParams) error {
+	_, err := q.db.Exec(ctx, updateDealDateTradeLogManual, arg.DealDate, arg.ID)
 	return err
 }
 
@@ -698,6 +1042,22 @@ func (q *Queries) UpdateSellOrderIdTradeLog(ctx context.Context, arg UpdateSellO
 	return err
 }
 
+const updateSellOrderIdTradeLogManual = `-- name: UpdateSellOrderIdTradeLogManual :exec
+UPDATE trade_log_manual
+SET orderId_sell = $1
+WHERE id = $2
+`
+
+type UpdateSellOrderIdTradeLogManualParams struct {
+	OrderidSell *string
+	ID          int
+}
+
+func (q *Queries) UpdateSellOrderIdTradeLogManual(ctx context.Context, arg UpdateSellOrderIdTradeLogManualParams) error {
+	_, err := q.db.Exec(ctx, updateSellOrderIdTradeLogManual, arg.OrderidSell, arg.ID)
+	return err
+}
+
 const updateSuccesTradeLog = `-- name: UpdateSuccesTradeLog :exec
 UPDATE trade_log
 SET close_date = $1, close_balance = $2, sell_price = $3
@@ -718,121 +1078,6 @@ func (q *Queries) UpdateSuccesTradeLog(ctx context.Context, arg UpdateSuccesTrad
 		arg.SellPrice,
 		arg.ID,
 	)
-	return err
-}
-
-const saveTradeLogManual = `-- name: SaveTradeLogManual :one
-INSERT INTO trade_log_manual (
-   open_date,
-   open_balance,
-   symbol,
-   buy_price,
-   amount,
-   orderId,
-   upLevel,
-   downLevel
-   )
-   VALUES (
-           $1,
-           $2,
-           $3,
-           $4,
-           $5,
-           $6,
-           $7,
-           $8
-   )
-   RETURNING id, open_date, deal_date, close_date, cancel_date, open_balance, close_balance, symbol, buy_price, sell_price, amount, orderid, orderid_sell, uplevel, downlevel
-`
-
-type SaveTradeLogManualParams struct {
-	OpenDate    time.Time
-	OpenBalance float64
-	Symbol      string
-	BuyPrice    float64
-	Amount      float64
-	Orderid     string
-	Uplevel     float64
-	Downlevel   float64
-}
-
-func (q *Queries) SaveTradeLogManual(ctx context.Context, arg SaveTradeLogManualParams) (TradeLogManual, error) {
-	row := q.db.QueryRow(ctx, saveTradeLogManual,
-		arg.OpenDate,
-		arg.OpenBalance,
-		arg.Symbol,
-		arg.BuyPrice,
-		arg.Amount,
-		arg.Orderid,
-		arg.Uplevel,
-		arg.Downlevel,
-	)
-	var i TradeLogManual
-	err := row.Scan(
-		&i.ID,
-		&i.OpenDate,
-		&i.DealDate,
-		&i.CloseDate,
-		&i.CancelDate,
-		&i.OpenBalance,
-		&i.CloseBalance,
-		&i.Symbol,
-		&i.BuyPrice,
-		&i.SellPrice,
-		&i.Amount,
-		&i.Orderid,
-		&i.OrderidSell,
-		&i.Uplevel,
-		&i.Downlevel,
-	)
-	return i, err
-}
-
-const updateDealDateTradeLogManual = `-- name: UpdateDealDateTradeLogManual :exec
-UPDATE trade_log_manual
-SET deal_date = $1
-WHERE id = $2
-`
-
-type UpdateDealDateTradeLogManualParams struct {
-	DealDate *time.Time
-	ID       int
-}
-
-func (q *Queries) UpdateDealDateTradeLogManual(ctx context.Context, arg UpdateDealDateTradeLogManualParams) error {
-	_, err := q.db.Exec(ctx, updateDealDateTradeLogManual, arg.DealDate, arg.ID)
-	return err
-}
-
-const updateCancelDateTradeLogManual = `-- name: UpdateCancelDateTradeLogManual :exec
-UPDATE trade_log_manual
-SET cancel_date = $1
-WHERE id = $2
-`
-
-type UpdateCancelDateTradeLogManualParams struct {
-	CancelDate *time.Time
-	ID         int
-}
-
-func (q *Queries) UpdateCancelDateTradeLogManual(ctx context.Context, arg UpdateCancelDateTradeLogManualParams) error {
-	_, err := q.db.Exec(ctx, updateCancelDateTradeLogManual, arg.CancelDate, arg.ID)
-	return err
-}
-
-const updateSellOrderIdTradeLogManual = `-- name: UpdateSellOrderIdTradeLogManual :exec
-UPDATE trade_log_manual
-SET orderId_sell = $1
-WHERE id = $2
-`
-
-type UpdateSellOrderIdTradeLogManualParams struct {
-	OrderidSell *string
-	ID          int
-}
-
-func (q *Queries) UpdateSellOrderIdTradeLogManual(ctx context.Context, arg UpdateSellOrderIdTradeLogManualParams) error {
-	_, err := q.db.Exec(ctx, updateSellOrderIdTradeLogManual, arg.OrderidSell, arg.ID)
 	return err
 }
 
@@ -859,83 +1104,81 @@ func (q *Queries) UpdateSuccesTradeLogManual(ctx context.Context, arg UpdateSucc
 	return err
 }
 
-const getLastTradeIdManual = `-- name: GetLastTradeIdManual :one
-SELECT COALESCE(MAX(id), 0) FROM trade_log_manual
+const upsertMarketDailyBar = `-- name: UpsertMarketDailyBar :exec
+INSERT INTO market_daily_bar (symbol, day_utc, close)
+VALUES ($1, $2, $3)
+ON CONFLICT (symbol, day_utc) DO UPDATE SET close = EXCLUDED.close
 `
 
-func (q *Queries) GetLastTradeIdManual(ctx context.Context) (int, error) {
-	row := q.db.QueryRow(ctx, getLastTradeIdManual)
-	var n int
-	err := row.Scan(&n)
-	return n, err
+type UpsertMarketDailyBarParams struct {
+	Symbol string
+	DayUtc pgtype.Date
+	Close  float64
 }
 
-const getOpenOrdersManual = `-- name: GetOpenOrdersManual :many
-SELECT id, open_date, deal_date, close_date, cancel_date, open_balance, close_balance, symbol, buy_price, sell_price, amount, orderid, orderid_sell, uplevel, downlevel FROM trade_log_manual
-WHERE 
-    close_date IS NULL
-    AND cancel_date IS NULL
-`
-
-func (q *Queries) GetOpenOrdersManual(ctx context.Context) ([]TradeLogManual, error) {
-	rows, err := q.db.Query(ctx, getOpenOrdersManual)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []TradeLogManual
-	for rows.Next() {
-		var i TradeLogManual
-		if err := rows.Scan(
-			&i.ID,
-			&i.OpenDate,
-			&i.DealDate,
-			&i.CloseDate,
-			&i.CancelDate,
-			&i.OpenBalance,
-			&i.CloseBalance,
-			&i.Symbol,
-			&i.BuyPrice,
-			&i.SellPrice,
-			&i.Amount,
-			&i.Orderid,
-			&i.OrderidSell,
-			&i.Uplevel,
-			&i.Downlevel,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
+func (q *Queries) UpsertMarketDailyBar(ctx context.Context, arg UpsertMarketDailyBarParams) error {
+	_, err := q.db.Exec(ctx, upsertMarketDailyBar, arg.Symbol, arg.DayUtc, arg.Close)
+	return err
 }
 
-const getTradeLogManualById = `-- name: GetTradeLogManualById :one
-SELECT id, open_date, deal_date, close_date, cancel_date, open_balance, close_balance, symbol, buy_price, sell_price, amount, orderid, orderid_sell, uplevel, downlevel FROM trade_log_manual WHERE id = $1
+const upsertMarketMinuteBar = `-- name: UpsertMarketMinuteBar :exec
+INSERT INTO market_minute_bar (symbol, open_time, open, high, low, close)
+VALUES ($1, $2, $3, $4, $5, $6)
+ON CONFLICT (symbol, open_time) DO UPDATE SET
+    open = EXCLUDED.open,
+    high = EXCLUDED.high,
+    low = EXCLUDED.low,
+    close = EXCLUDED.close
 `
 
-func (q *Queries) GetTradeLogManualById(ctx context.Context, id int) (TradeLogManual, error) {
-	row := q.db.QueryRow(ctx, getTradeLogManualById, id)
-	var i TradeLogManual
-	err := row.Scan(
-		&i.ID,
-		&i.OpenDate,
-		&i.DealDate,
-		&i.CloseDate,
-		&i.CancelDate,
-		&i.OpenBalance,
-		&i.CloseBalance,
-		&i.Symbol,
-		&i.BuyPrice,
-		&i.SellPrice,
-		&i.Amount,
-		&i.Orderid,
-		&i.OrderidSell,
-		&i.Uplevel,
-		&i.Downlevel,
+type UpsertMarketMinuteBarParams struct {
+	Symbol   string
+	OpenTime time.Time
+	Open     float64
+	High     float64
+	Low      float64
+	Close    float64
+}
+
+func (q *Queries) UpsertMarketMinuteBar(ctx context.Context, arg UpsertMarketMinuteBarParams) error {
+	_, err := q.db.Exec(ctx, upsertMarketMinuteBar,
+		arg.Symbol,
+		arg.OpenTime,
+		arg.Open,
+		arg.High,
+		arg.Low,
+		arg.Close,
 	)
-	return i, err
+	return err
+}
+
+const upsertTrendRetestState = `-- name: UpsertTrendRetestState :exec
+INSERT INTO trend_retest_state (
+    symbol, sma_period, day_utc, wait_retest, retest_until, last_processed_open_time
+) VALUES ($1, $2, $3, $4, $5, $6)
+ON CONFLICT (symbol, sma_period, day_utc) DO UPDATE SET
+    wait_retest = EXCLUDED.wait_retest,
+    retest_until = EXCLUDED.retest_until,
+    last_processed_open_time = EXCLUDED.last_processed_open_time
+`
+
+type UpsertTrendRetestStateParams struct {
+	Symbol                string
+	SmaPeriod             int
+	DayUtc                pgtype.Date
+	WaitRetest            bool
+	RetestUntil           *time.Time
+	LastProcessedOpenTime *time.Time
+}
+
+func (q *Queries) UpsertTrendRetestState(ctx context.Context, arg UpsertTrendRetestStateParams) error {
+	_, err := q.db.Exec(ctx, upsertTrendRetestState,
+		arg.Symbol,
+		arg.SmaPeriod,
+		arg.DayUtc,
+		arg.WaitRetest,
+		arg.RetestUntil,
+		arg.LastProcessedOpenTime,
+	)
+	return err
 }

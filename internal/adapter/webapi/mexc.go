@@ -277,23 +277,39 @@ func (m *MexcWebapi) GetKlines(
 	pair model.PairWithLevels,
 	interval enum.KlineInterval,
 ) (*mexc.Klines, error) {
-	symbol := pair.Pair.String()
-	intervalStr := interval.String()
+	return m.GetKlinesPublic(context.Background(), pair.Pair.String(), interval, 700, nil)
+}
 
-	// Используем прямой HTTP запрос для публичного endpoint /api/v3/klines
-	// Используем publicClient без заголовка X-MEXC-APIKEY
+// GetKlinesPublic — публичные klines (symbol, interval, limit, опциональный startTime в мс).
+func (m *MexcWebapi) GetKlinesPublic(
+	ctx context.Context,
+	symbol string,
+	interval enum.KlineInterval,
+	limit int,
+	startTimeMs *int64,
+) (*mexc.Klines, error) {
+	_ = ctx
+	if limit <= 0 {
+		limit = 100
+	}
+	if limit > 1000 {
+		limit = 1000
+	}
+	params := map[string]string{
+		"symbol":   symbol,
+		"interval": interval.String(),
+		"limit":    strconv.Itoa(limit),
+	}
+	if startTimeMs != nil && *startTimeMs > 0 {
+		params["startTime"] = strconv.FormatInt(*startTimeMs, 10)
+	}
+
 	res, err := m.publicClient.R().
-		SetQueryParams(map[string]string{
-			"symbol":   symbol,
-			"interval": intervalStr,
-			"limit":    "700",
-		}).
+		SetQueryParams(params).
 		Get("/api/v3/klines")
-
 	if err != nil {
 		return nil, wrap.Errorf("failed to get klines: %w", err)
 	}
-
 	if res.IsError() {
 		return nil, wrap.Errorf("failed to get klines, status: %d, body: %s", res.StatusCode(), string(res.Body()))
 	}
@@ -302,7 +318,6 @@ func (m *MexcWebapi) GetKlines(
 	if err != nil {
 		return nil, wrap.Errorf("failed to parse klines: %w", err)
 	}
-
 	return &klines, nil
 }
 

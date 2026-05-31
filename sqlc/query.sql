@@ -217,3 +217,59 @@ WHERE
 
 -- name: GetTradeLogManualById :one
 SELECT * FROM trade_log_manual WHERE id = $1;
+
+-- name: UpsertMarketDailyBar :exec
+INSERT INTO market_daily_bar (symbol, day_utc, close)
+VALUES ($1, $2, $3)
+ON CONFLICT (symbol, day_utc) DO UPDATE SET close = EXCLUDED.close;
+
+-- name: CountMarketDailyBars :one
+SELECT COUNT(*)::bigint FROM market_daily_bar WHERE symbol = $1;
+
+-- name: ListMarketDailyBars :many
+SELECT symbol, day_utc, close FROM market_daily_bar
+WHERE symbol = $1
+ORDER BY day_utc ASC;
+
+-- name: UpsertMarketMinuteBar :exec
+INSERT INTO market_minute_bar (symbol, open_time, open, high, low, close)
+VALUES ($1, $2, $3, $4, $5, $6)
+ON CONFLICT (symbol, open_time) DO UPDATE SET
+    open = EXCLUDED.open,
+    high = EXCLUDED.high,
+    low = EXCLUDED.low,
+    close = EXCLUDED.close;
+
+-- name: GetLastMinuteBarOpenTime :one
+SELECT open_time FROM market_minute_bar
+WHERE symbol = $1
+ORDER BY open_time DESC
+LIMIT 1;
+
+-- name: ListMarketMinuteBarsFrom :many
+SELECT symbol, open_time, open, high, low, close FROM market_minute_bar
+WHERE symbol = $1 AND open_time >= $2
+ORDER BY open_time ASC;
+
+-- name: GetTrendRetestState :one
+SELECT * FROM trend_retest_state
+WHERE symbol = $1 AND sma_period = $2 AND day_utc = $3;
+
+-- name: UpsertTrendRetestState :exec
+INSERT INTO trend_retest_state (
+    symbol, sma_period, day_utc, wait_retest, retest_until, last_processed_open_time
+) VALUES ($1, $2, $3, $4, $5, $6)
+ON CONFLICT (symbol, sma_period, day_utc) DO UPDATE SET
+    wait_retest = EXCLUDED.wait_retest,
+    retest_until = EXCLUDED.retest_until,
+    last_processed_open_time = EXCLUDED.last_processed_open_time;
+
+-- name: TrendSignalWasSent :one
+SELECT EXISTS(
+    SELECT 1 FROM trend_signal_sent
+    WHERE symbol = $1 AND sma_period = $2 AND day_utc = $3 AND signal_kind = $4
+) AS sent;
+
+-- name: InsertTrendSignalSent :exec
+INSERT INTO trend_signal_sent (symbol, sma_period, day_utc, signal_kind)
+VALUES ($1, $2, $3, $4);

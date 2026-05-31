@@ -35,6 +35,9 @@ type Usecases struct {
 	GetCoinList           *usecase.GetCoinList
 	CheckPalisadeCoinList *usecase.CheckPalisadeCoinList
 	CheckPalisadeCoin     *usecase.CheckPalisadeCoin
+	BackfillTrendBars     *usecase.BackfillTrendBars
+	SyncTrendBars         *usecase.SyncTrendBars
+	CheckTrendRetest      *usecase.CheckTrendRetest
 }
 
 func NewContainer(
@@ -65,6 +68,7 @@ func NewContainer(
 	}
 
 	stateRepo := registry.NewStateRepository(db)
+	trendRepo := registry.NewTrendRepository(db)
 
 	// Создаем сервисы
 	palisadeCheckerService := service.NewPalisadeCheckerService(mexcApi, stateRepo)
@@ -100,6 +104,9 @@ func NewContainer(
 			GetCoinList:           usecase.NewGetCoinListUsecase(mexcApi, stateRepo),
 			CheckPalisadeCoinList: usecase.NewCheckPalisadeCoinListUsecase(palisadeCheckerService, stateRepo),
 			CheckPalisadeCoin:     usecase.NewCheckPalisadeCoinUsecase(palisadeCheckerService, stateRepo),
+			BackfillTrendBars:     usecase.NewBackfillTrendBarsUsecase(mexcApi, trendRepo),
+			SyncTrendBars:         usecase.NewSyncTrendBarsUsecase(mexcApi, trendRepo),
+			CheckTrendRetest:      usecase.NewCheckTrendRetestUsecase(mexcApi, trendRepo, telegramApi),
 		},
 		MexcSpot: mexcSpot,
 		Clean: func() {

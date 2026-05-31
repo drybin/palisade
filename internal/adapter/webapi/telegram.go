@@ -30,6 +30,10 @@ func NewTelegramWebapi(
 	}
 }
 
+func (c *TelegramWebapi) Configured() bool {
+	return c != nil && c.botToken != "" && c.chatId != ""
+}
+
 func (c *TelegramWebapi) Send(msg string) (bool, error) {
 
 	resp, err := c.client.R().

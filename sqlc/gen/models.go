@@ -6,6 +6,8 @@ package palisade_database
 
 import (
 	"time"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 type Coin struct {
@@ -59,6 +61,21 @@ type Log struct {
 	Downlevel      float64
 }
 
+type MarketDailyBar struct {
+	Symbol string
+	DayUtc pgtype.Date
+	Close  float64
+}
+
+type MarketMinuteBar struct {
+	Symbol   string
+	OpenTime time.Time
+	Open     float64
+	High     float64
+	Low      float64
+	Close    float64
+}
+
 type State struct {
 	ID             int
 	Date           time.Time
@@ -107,4 +124,22 @@ type TradeLogManual struct {
 	OrderidSell  *string
 	Uplevel      float64
 	Downlevel    float64
+}
+
+type TrendRetestState struct {
+	Symbol                string
+	SmaPeriod             int
+	DayUtc                pgtype.Date
+	WaitRetest            bool
+	RetestUntil           *time.Time
+	LastProcessedOpenTime *time.Time
+}
+
+type TrendSignalSent struct {
+	ID         int
+	Symbol     string
+	SmaPeriod  int
+	DayUtc     pgtype.Date
+	SignalKind string
+	SentAt     time.Time
 }

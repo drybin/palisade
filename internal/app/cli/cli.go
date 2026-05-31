@@ -40,6 +40,9 @@ func Run(config *config.Config) error {
 		command.NewGetCoinListCommand(cnt.Usecases.GetCoinList),
 		command.NewCheckPalisadeCoinListCommand(cnt.Usecases.CheckPalisadeCoinList),
 		command.NewCheckPalisadeCoinCommand(cnt.Usecases.CheckPalisadeCoin),
+		command.NewBackfillTrendBarsCommand(cnt.Usecases.BackfillTrendBars),
+		command.NewSyncTrendBarsCommand(cnt.Usecases.SyncTrendBars),
+		command.NewCheckTrendRetestCommand(cnt.Usecases.CheckTrendRetest),
 	}
 
 	return app.Run(os.Args)
