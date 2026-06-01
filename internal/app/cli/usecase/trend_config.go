@@ -9,7 +9,9 @@ import (
 )
 
 const (
-	defaultTrendWatchlist = "BTC,ETH,BNB,XRP,SOL,TRX,HYPE,DOGE,ZEC,XLM,ADA,XMR,LINK,BCH,TON,LTC,SUI,SHIB,DOT,OKB,ASTER"
+	defaultTrendWatchlist = "BTC,ETH,BNB,XRP,SOL,TRX,HYPE,DOGE,ZEC,XLM,ADA,XMR,LINK,BCH,TON,LTC,SUI,SHIB,DOT,OKB,ASTER," +
+		"AVAX,UNI,ATOM,NEAR,APT,ARB,OP,POL,ICP,FIL,HBAR,ETC,INJ,RENDER," +
+		"TAO,SEI,STX,WLD,PEPE"
 	defaultTrendDays      = 100
 	defaultTrendSleepMs   = 200
 	defaultTrendSMAMin    = 10
