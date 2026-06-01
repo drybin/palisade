@@ -50,6 +50,9 @@ func TestProcessRetestFSM_touch(t *testing.T) {
 	if sig.EntryPrice != 100.2 {
 		t.Fatalf("entry %v", sig.EntryPrice)
 	}
+	if sig.TouchMin != 99.9 || sig.TouchMax != 100.1 {
+		t.Fatalf("zone min=%v max=%v", sig.TouchMin, sig.TouchMax)
+	}
 	if st.WaitRetest {
 		t.Fatal("waitRetest should be false after signal")
 	}

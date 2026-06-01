@@ -129,11 +129,7 @@ func (u *CheckTrendRetest) Process(ctx context.Context, opts TrendOptions) error
 				continue
 			}
 
-			msg := fmt.Sprintf(
-				"🟢 <b>Retest LONG</b> %s | SMA %d | %s UTC\nSMA %.8g (ε %.2f%%) | entry close %.8g\n%s",
-				symbol, period, sig.OpenTime.UTC().Format("2006-01-02 15:04"),
-				sig.SMA, opts.RetestEpsilon, sig.EntryPrice, sig.OpenTime.UTC().Format(time.RFC3339),
-			)
+			msg := formatRetestSignalMessage(symbol, period, sig, opts.RetestEpsilon)
 			if opts.DryRun {
 				fmt.Println("[dry-run]", msg)
 			} else {
@@ -162,4 +158,21 @@ func timePtr(t time.Time) *time.Time {
 		return nil
 	}
 	return &t
+}
+
+func formatRetestSignalMessage(symbol string, period int, sig *service.RetestSignal, epsilonPct float64) string {
+	return fmt.Sprintf(
+		"🟢 <b>Retest LONG</b> %s | SMA %d | %s UTC\n"+
+			"Уровень SMA: %.8g\n"+
+			"Зона retest: %.8g – %.8g (ε %.2f%%)\n"+
+			"Вход (close): %.8g",
+		symbol,
+		period,
+		sig.OpenTime.UTC().Format("2006-01-02 15:04"),
+		sig.SMA,
+		sig.TouchMin,
+		sig.TouchMax,
+		epsilonPct,
+		sig.EntryPrice,
+	)
 }

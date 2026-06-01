@@ -27,6 +27,8 @@ type RetestFSMState struct {
 type RetestSignal struct {
 	EntryPrice float64
 	SMA        float64
+	TouchMin   float64
+	TouchMax   float64
 	OpenTime   time.Time
 }
 
@@ -121,6 +123,8 @@ func ProcessRetestFSM(
 				return st, &RetestSignal{
 					EntryPrice: c.Close,
 					SMA:        sma,
+					TouchMin:   touchMin,
+					TouchMax:   touchMax,
 					OpenTime:   c.OpenTime,
 				}
 			}
