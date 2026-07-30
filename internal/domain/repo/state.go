@@ -15,6 +15,18 @@ type GetCoinsParams struct {
 	Offset               int
 }
 
+type MarketSnapshot struct {
+	Symbol             string
+	CollectedAt        time.Time
+	LastPrice          float64
+	BidPrice           float64
+	BidQty             float64
+	AskPrice           float64
+	AskQty             float64
+	QuoteVolume24h     float64
+	PriceChangePercent float64
+}
+
 type IStateRepository interface {
 	GetCoinState(context.Context, model.Coin, model.Coin) (*model.State, error)
 	GetCountLogsByCoin(context.Context, model.Coin, model.Coin) (*int, error)
@@ -43,6 +55,10 @@ type IStateRepository interface {
 	UpdateAmountTradeLogManual(context.Context, int, float64) error
 	UpdateSellOrderIdTradeLogManual(context.Context, int, string) error
 	UpdateSuccesTradeLogManual(context.Context, int, time.Time, float64, float64) error
+	UpsertMarketSnapshot(context.Context, MarketSnapshot) error
+	ListMarketSnapshots(context.Context) ([]MarketSnapshot, error)
+	GetLastPalisadeSignal(context.Context, string) (*time.Time, error)
+	SavePalisadeSignal(context.Context, string, time.Time, float64) error
 }
 
 type SaveTradeLogParams struct {

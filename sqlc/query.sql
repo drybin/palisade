@@ -283,3 +283,32 @@ SELECT EXISTS(
 -- name: InsertTrendSignalSent :exec
 INSERT INTO trend_signal_sent (symbol, sma_period, day_utc, signal_kind)
 VALUES ($1, $2, $3, $4);
+
+-- name: UpsertMarketSnapshot :exec
+INSERT INTO market_snapshot (
+    symbol, collected_at, last_price, bid_price, bid_qty, ask_price, ask_qty,
+    quote_volume_24h, price_change_percent
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+ON CONFLICT (symbol) DO UPDATE SET
+    collected_at = EXCLUDED.collected_at,
+    last_price = EXCLUDED.last_price,
+    bid_price = EXCLUDED.bid_price,
+    bid_qty = EXCLUDED.bid_qty,
+    ask_price = EXCLUDED.ask_price,
+    ask_qty = EXCLUDED.ask_qty,
+    quote_volume_24h = EXCLUDED.quote_volume_24h,
+    price_change_percent = EXCLUDED.price_change_percent;
+
+-- name: ListMarketSnapshots :many
+SELECT symbol, collected_at, last_price, bid_price, bid_qty, ask_price, ask_qty,
+       quote_volume_24h, price_change_percent
+FROM market_snapshot
+ORDER BY quote_volume_24h DESC;
+
+-- name: GetLastPalisadeSignal :one
+SELECT sent_at FROM palisade_signal WHERE symbol = $1;
+
+-- name: SavePalisadeSignal :exec
+INSERT INTO palisade_signal (symbol, sent_at, score)
+VALUES ($1, $2, $3)
+ON CONFLICT (symbol) DO UPDATE SET sent_at = EXCLUDED.sent_at, score = EXCLUDED.score;

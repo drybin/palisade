@@ -633,6 +633,65 @@ func (u StateRepository) UpdateSuccesTradeLogManual(ctx context.Context, id int,
 	return nil
 }
 
+func (u StateRepository) UpsertMarketSnapshot(ctx context.Context, snapshot repo.MarketSnapshot) error {
+	db := palisade_database.New(u.Postgree)
+	return db.UpsertMarketSnapshot(ctx, palisade_database.UpsertMarketSnapshotParams{
+		Symbol:             snapshot.Symbol,
+		CollectedAt:        snapshot.CollectedAt,
+		LastPrice:          snapshot.LastPrice,
+		BidPrice:           snapshot.BidPrice,
+		BidQty:             snapshot.BidQty,
+		AskPrice:           snapshot.AskPrice,
+		AskQty:             snapshot.AskQty,
+		QuoteVolume24h:     snapshot.QuoteVolume24h,
+		PriceChangePercent: snapshot.PriceChangePercent,
+	})
+}
+
+func (u StateRepository) ListMarketSnapshots(ctx context.Context) ([]repo.MarketSnapshot, error) {
+	db := palisade_database.New(u.Postgree)
+	rows, err := db.ListMarketSnapshots(ctx)
+	if err != nil {
+		return nil, wrap.Errorf("list market snapshots: %w", err)
+	}
+	result := make([]repo.MarketSnapshot, 0, len(rows))
+	for _, row := range rows {
+		result = append(result, repo.MarketSnapshot{
+			Symbol:             row.Symbol,
+			CollectedAt:        row.CollectedAt,
+			LastPrice:          row.LastPrice,
+			BidPrice:           row.BidPrice,
+			BidQty:             row.BidQty,
+			AskPrice:           row.AskPrice,
+			AskQty:             row.AskQty,
+			QuoteVolume24h:     row.QuoteVolume24h,
+			PriceChangePercent: row.PriceChangePercent,
+		})
+	}
+	return result, nil
+}
+
+func (u StateRepository) GetLastPalisadeSignal(ctx context.Context, symbol string) (*time.Time, error) {
+	db := palisade_database.New(u.Postgree)
+	sentAt, err := db.GetLastPalisadeSignal(ctx, symbol)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, wrap.Errorf("get last palisade signal for %s: %w", symbol, err)
+	}
+	return &sentAt, nil
+}
+
+func (u StateRepository) SavePalisadeSignal(ctx context.Context, symbol string, sentAt time.Time, score float64) error {
+	db := palisade_database.New(u.Postgree)
+	return db.SavePalisadeSignal(ctx, palisade_database.SavePalisadeSignalParams{
+		Symbol: symbol,
+		SentAt: sentAt,
+		Score:  score,
+	})
+}
+
 func mapCoinToDomainModel(c palisade_database.Coin) (*mexc.SymbolDetail, error) {
 	return &mexc.SymbolDetail{
 		Symbol:                     c.Symbol,

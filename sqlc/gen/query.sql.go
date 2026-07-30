@@ -355,6 +355,17 @@ func (q *Queries) GetLastMinuteBarOpenTime(ctx context.Context, symbol string) (
 	return open_time, err
 }
 
+const getLastPalisadeSignal = `-- name: GetLastPalisadeSignal :one
+SELECT sent_at FROM palisade_signal WHERE symbol = $1
+`
+
+func (q *Queries) GetLastPalisadeSignal(ctx context.Context, symbol string) (time.Time, error) {
+	row := q.db.QueryRow(ctx, getLastPalisadeSignal, symbol)
+	var sent_at time.Time
+	err := row.Scan(&sent_at)
+	return sent_at, err
+}
+
 const getLastTradeId = `-- name: GetLastTradeId :one
 SELECT MAX(id) FROM trade_log
 `
@@ -601,6 +612,43 @@ func (q *Queries) ListMarketMinuteBarsFrom(ctx context.Context, arg ListMarketMi
 	return items, nil
 }
 
+const listMarketSnapshots = `-- name: ListMarketSnapshots :many
+SELECT symbol, collected_at, last_price, bid_price, bid_qty, ask_price, ask_qty,
+       quote_volume_24h, price_change_percent
+FROM market_snapshot
+ORDER BY quote_volume_24h DESC
+`
+
+func (q *Queries) ListMarketSnapshots(ctx context.Context) ([]MarketSnapshot, error) {
+	rows, err := q.db.Query(ctx, listMarketSnapshots)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []MarketSnapshot
+	for rows.Next() {
+		var i MarketSnapshot
+		if err := rows.Scan(
+			&i.Symbol,
+			&i.CollectedAt,
+			&i.LastPrice,
+			&i.BidPrice,
+			&i.BidQty,
+			&i.AskPrice,
+			&i.AskQty,
+			&i.QuoteVolume24h,
+			&i.PriceChangePercent,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const saveCoin = `-- name: SaveCoin :one
 INSERT INTO
     coins (
@@ -750,6 +798,23 @@ func (q *Queries) SaveCoin(ctx context.Context, arg SaveCoinParams) (Coin, error
 		&i.Maxrise,
 	)
 	return i, err
+}
+
+const savePalisadeSignal = `-- name: SavePalisadeSignal :exec
+INSERT INTO palisade_signal (symbol, sent_at, score)
+VALUES ($1, $2, $3)
+ON CONFLICT (symbol) DO UPDATE SET sent_at = EXCLUDED.sent_at, score = EXCLUDED.score
+`
+
+type SavePalisadeSignalParams struct {
+	Symbol string
+	SentAt time.Time
+	Score  float64
+}
+
+func (q *Queries) SavePalisadeSignal(ctx context.Context, arg SavePalisadeSignalParams) error {
+	_, err := q.db.Exec(ctx, savePalisadeSignal, arg.Symbol, arg.SentAt, arg.Score)
+	return err
 }
 
 const saveTradeLog = `-- name: SaveTradeLog :one
@@ -1180,6 +1245,49 @@ func (q *Queries) UpsertMarketMinuteBar(ctx context.Context, arg UpsertMarketMin
 		arg.High,
 		arg.Low,
 		arg.Close,
+	)
+	return err
+}
+
+const upsertMarketSnapshot = `-- name: UpsertMarketSnapshot :exec
+INSERT INTO market_snapshot (
+    symbol, collected_at, last_price, bid_price, bid_qty, ask_price, ask_qty,
+    quote_volume_24h, price_change_percent
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+ON CONFLICT (symbol) DO UPDATE SET
+    collected_at = EXCLUDED.collected_at,
+    last_price = EXCLUDED.last_price,
+    bid_price = EXCLUDED.bid_price,
+    bid_qty = EXCLUDED.bid_qty,
+    ask_price = EXCLUDED.ask_price,
+    ask_qty = EXCLUDED.ask_qty,
+    quote_volume_24h = EXCLUDED.quote_volume_24h,
+    price_change_percent = EXCLUDED.price_change_percent
+`
+
+type UpsertMarketSnapshotParams struct {
+	Symbol             string
+	CollectedAt        time.Time
+	LastPrice          float64
+	BidPrice           float64
+	BidQty             float64
+	AskPrice           float64
+	AskQty             float64
+	QuoteVolume24h     float64
+	PriceChangePercent float64
+}
+
+func (q *Queries) UpsertMarketSnapshot(ctx context.Context, arg UpsertMarketSnapshotParams) error {
+	_, err := q.db.Exec(ctx, upsertMarketSnapshot,
+		arg.Symbol,
+		arg.CollectedAt,
+		arg.LastPrice,
+		arg.BidPrice,
+		arg.BidQty,
+		arg.AskPrice,
+		arg.AskQty,
+		arg.QuoteVolume24h,
+		arg.PriceChangePercent,
 	)
 	return err
 }

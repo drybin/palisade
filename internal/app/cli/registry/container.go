@@ -24,20 +24,22 @@ type Container struct {
 }
 
 type Usecases struct {
-	HelloWorld            *usecase.HelloWorld
-	CheckSwap             *usecase.CheckSwap
-	PalisadeProcess       *usecase.PalisadeProcess
-	PalisadeProcessMulti  *usecase.PalisadeProcessMulti
-	PalisadeProcessSell        *usecase.PalisadeProcessSell
-	PalisadeProcessManual      *usecase.PalisadeProcessManual
-	PalisadeProcessSellManual  *usecase.PalisadeProcessSell
-	SwapProcess           *usecase.SwapProcess
-	GetCoinList           *usecase.GetCoinList
-	CheckPalisadeCoinList *usecase.CheckPalisadeCoinList
-	CheckPalisadeCoin     *usecase.CheckPalisadeCoin
-	BackfillTrendBars     *usecase.BackfillTrendBars
-	SyncTrendBars         *usecase.SyncTrendBars
-	CheckTrendRetest      *usecase.CheckTrendRetest
+	HelloWorld                *usecase.HelloWorld
+	CheckSwap                 *usecase.CheckSwap
+	PalisadeProcess           *usecase.PalisadeProcess
+	PalisadeProcessMulti      *usecase.PalisadeProcessMulti
+	PalisadeProcessSell       *usecase.PalisadeProcessSell
+	PalisadeProcessManual     *usecase.PalisadeProcessManual
+	PalisadeProcessSellManual *usecase.PalisadeProcessSell
+	SwapProcess               *usecase.SwapProcess
+	GetCoinList               *usecase.GetCoinList
+	CheckPalisadeCoinList     *usecase.CheckPalisadeCoinList
+	CheckPalisadeCoin         *usecase.CheckPalisadeCoin
+	BackfillTrendBars         *usecase.BackfillTrendBars
+	SyncTrendBars             *usecase.SyncTrendBars
+	CheckTrendRetest          *usecase.CheckTrendRetest
+	CollectMarketData         *usecase.CollectMarketData
+	ScorePalisadeCandidates   *usecase.ScorePalisadeCandidates
 }
 
 func NewContainer(
@@ -100,13 +102,15 @@ func NewContainer(
 			PalisadeProcessSell:       usecase.NewPalisadeProcessSellUsecase(mexcApi, stateRepo, telegramApi),
 			PalisadeProcessManual:     usecase.NewPalisadeProcessManualUsecase(mexcApi, stateRepo, telegramApi),
 			PalisadeProcessSellManual: usecase.NewPalisadeProcessSellManualUsecase(mexcApi, stateRepo, telegramApi),
-			SwapProcess:           usecase.NewSwapProcessUsecase(mexcApi, stateRepo),
-			GetCoinList:           usecase.NewGetCoinListUsecase(mexcApi, stateRepo),
-			CheckPalisadeCoinList: usecase.NewCheckPalisadeCoinListUsecase(palisadeCheckerService, stateRepo),
-			CheckPalisadeCoin:     usecase.NewCheckPalisadeCoinUsecase(palisadeCheckerService, stateRepo),
-			BackfillTrendBars:     usecase.NewBackfillTrendBarsUsecase(mexcApi, trendRepo),
-			SyncTrendBars:         usecase.NewSyncTrendBarsUsecase(mexcApi, trendRepo),
-			CheckTrendRetest:      usecase.NewCheckTrendRetestUsecase(mexcApi, trendRepo, telegramApi),
+			SwapProcess:               usecase.NewSwapProcessUsecase(mexcApi, stateRepo),
+			GetCoinList:               usecase.NewGetCoinListUsecase(mexcApi, stateRepo),
+			CheckPalisadeCoinList:     usecase.NewCheckPalisadeCoinListUsecase(palisadeCheckerService, stateRepo),
+			CheckPalisadeCoin:         usecase.NewCheckPalisadeCoinUsecase(palisadeCheckerService, stateRepo),
+			BackfillTrendBars:         usecase.NewBackfillTrendBarsUsecase(mexcApi, trendRepo),
+			SyncTrendBars:             usecase.NewSyncTrendBarsUsecase(mexcApi, trendRepo),
+			CheckTrendRetest:          usecase.NewCheckTrendRetestUsecase(mexcApi, trendRepo, telegramApi),
+			CollectMarketData:         usecase.NewCollectMarketDataUsecase(mexcApi, stateRepo),
+			ScorePalisadeCandidates:   usecase.NewScorePalisadeCandidatesUsecase(mexcApi, stateRepo, telegramApi),
 		},
 		MexcSpot: mexcSpot,
 		Clean: func() {

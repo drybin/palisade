@@ -119,6 +119,24 @@ CREATE TABLE market_minute_bar (
 
 CREATE INDEX market_minute_bar_symbol_open_time_idx ON market_minute_bar (symbol, open_time);
 
+CREATE TABLE market_snapshot (
+    symbol               TEXT PRIMARY KEY,
+    collected_at         TIMESTAMPTZ NOT NULL,
+    last_price           DOUBLE PRECISION NOT NULL,
+    bid_price            DOUBLE PRECISION NOT NULL,
+    bid_qty              DOUBLE PRECISION NOT NULL,
+    ask_price            DOUBLE PRECISION NOT NULL,
+    ask_qty              DOUBLE PRECISION NOT NULL,
+    quote_volume_24h     DOUBLE PRECISION NOT NULL,
+    price_change_percent DOUBLE PRECISION NOT NULL
+);
+
+CREATE TABLE palisade_signal (
+    symbol       TEXT PRIMARY KEY,
+    sent_at      TIMESTAMPTZ NOT NULL,
+    score        DOUBLE PRECISION NOT NULL
+);
+
 CREATE TABLE trend_retest_state (
     symbol                  TEXT NOT NULL,
     sma_period              INT NOT NULL,

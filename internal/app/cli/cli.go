@@ -43,6 +43,8 @@ func Run(config *config.Config) error {
 		command.NewBackfillTrendBarsCommand(cnt.Usecases.BackfillTrendBars),
 		command.NewSyncTrendBarsCommand(cnt.Usecases.SyncTrendBars),
 		command.NewCheckTrendRetestCommand(cnt.Usecases.CheckTrendRetest),
+		command.NewCollectMarketDataCommand(cnt.Usecases.CollectMarketData),
+		command.NewScorePalisadeCandidatesCommand(cnt.Usecases.ScorePalisadeCandidates),
 	}
 
 	return app.Run(os.Args)

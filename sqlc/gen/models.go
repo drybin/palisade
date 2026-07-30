@@ -76,6 +76,24 @@ type MarketMinuteBar struct {
 	Close    float64
 }
 
+type MarketSnapshot struct {
+	Symbol             string
+	CollectedAt        time.Time
+	LastPrice          float64
+	BidPrice           float64
+	BidQty             float64
+	AskPrice           float64
+	AskQty             float64
+	QuoteVolume24h     float64
+	PriceChangePercent float64
+}
+
+type PalisadeSignal struct {
+	Symbol string
+	SentAt time.Time
+	Score  float64
+}
+
 type State struct {
 	ID             int
 	Date           time.Time

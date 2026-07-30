@@ -97,6 +97,22 @@ func (m *MexcWebapi) GetAllBookTickers(ctx context.Context) (*mexc.BookTickers, 
 	return &out, nil
 }
 
+func (m *MexcWebapi) GetAll24hTickers(ctx context.Context) (*mexc.Tickers24h, error) {
+	res, err := m.publicClient.R().Get("/api/v3/ticker/24hr")
+	if err != nil {
+		return nil, wrap.Errorf("failed to get 24h tickers: %w", err)
+	}
+	if res.IsError() {
+		return nil, wrap.Errorf("failed to get 24h tickers, status: %d, body: %s", res.StatusCode(), string(res.Body()))
+	}
+
+	var result mexc.Tickers24h
+	if err := json.Unmarshal(res.Body(), &result); err != nil {
+		return nil, wrap.Errorf("failed to unmarshal 24h tickers: %w", err)
+	}
+	return &result, nil
+}
+
 func (m *MexcWebapi) GetSymbolInfo(ctx context.Context, symbol string) (*mexc.SymbolInfo, error) {
 	options := map[string]string{
 		"symbol": symbol,
