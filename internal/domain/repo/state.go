@@ -29,6 +29,7 @@ type IStateRepository interface {
 	SaveTradeLog(context.Context, SaveTradeLogParams) (*TradeLog, error)
 	UpdateDealDateTradeLog(context.Context, int, time.Time) error
 	UpdateCancelDateTradeLog(context.Context, int, time.Time) error
+	UpdateAmountTradeLog(context.Context, int, float64) error
 	UpdateSellOrderIdTradeLog(context.Context, int, string) error
 	UpdateSuccesTradeLog(context.Context, int, time.Time, float64, float64) error
 	GetOpenOrders(context.Context) ([]TradeLog, error)
@@ -39,6 +40,7 @@ type IStateRepository interface {
 	GetNextTradeIdManual(context.Context) (int, error)
 	UpdateDealDateTradeLogManual(context.Context, int, time.Time) error
 	UpdateCancelDateTradeLogManual(context.Context, int, time.Time) error
+	UpdateAmountTradeLogManual(context.Context, int, float64) error
 	UpdateSellOrderIdTradeLogManual(context.Context, int, string) error
 	UpdateSuccesTradeLogManual(context.Context, int, time.Time, float64, float64) error
 }

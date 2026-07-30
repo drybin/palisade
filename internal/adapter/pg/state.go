@@ -390,6 +390,20 @@ func (u StateRepository) UpdateSellOrderIdTradeLog(ctx context.Context, id int, 
 	return nil
 }
 
+func (u StateRepository) UpdateAmountTradeLog(ctx context.Context, id int, amount float64) error {
+	db := palisade_database.New(u.Postgree)
+
+	err := db.UpdateAmountTradeLog(ctx, palisade_database.UpdateAmountTradeLogParams{
+		ID:     id,
+		Amount: amount,
+	})
+	if err != nil {
+		return wrap.Errorf("failed to update amount for trade log id %d: %w", id, err)
+	}
+
+	return nil
+}
+
 func (u StateRepository) GetOpenOrders(ctx context.Context) ([]repo.TradeLog, error) {
 	db := palisade_database.New(u.Postgree)
 
@@ -591,6 +605,20 @@ func (u StateRepository) UpdateSellOrderIdTradeLogManual(ctx context.Context, id
 	return nil
 }
 
+func (u StateRepository) UpdateAmountTradeLogManual(ctx context.Context, id int, amount float64) error {
+	db := palisade_database.New(u.Postgree)
+
+	err := db.UpdateAmountTradeLogManual(ctx, palisade_database.UpdateAmountTradeLogManualParams{
+		ID:     id,
+		Amount: amount,
+	})
+	if err != nil {
+		return wrap.Errorf("failed to update amount for manual trade log id %d: %w", id, err)
+	}
+
+	return nil
+}
+
 func (u StateRepository) UpdateSuccesTradeLogManual(ctx context.Context, id int, closeDate time.Time, closeBalance float64, sellPrice float64) error {
 	db := palisade_database.New(u.Postgree)
 	err := db.UpdateSuccesTradeLogManual(ctx, palisade_database.UpdateSuccesTradeLogManualParams{
@@ -607,22 +635,22 @@ func (u StateRepository) UpdateSuccesTradeLogManual(ctx context.Context, id int,
 
 func mapCoinToDomainModel(c palisade_database.Coin) (*mexc.SymbolDetail, error) {
 	return &mexc.SymbolDetail{
-		Symbol:                   c.Symbol,
-		Status:                   strconv.Itoa(c.Status),
-		BaseAsset:                c.Baseasset,
-		BaseAssetPrecision:       c.Baseassetprecision,
-		QuoteAsset:               c.Quoteasset,
-		QuotePrecision:           c.Quoteprecision,
-		QuoteAssetPrecision:      c.Quoteassetprecision,
-		BaseCommissionPrecision:  c.Basecommissionprecision,
-		QuoteCommissionPrecision: c.Quotecommissionprecision,
-		OrderTypes:               c.Ordertypes,
-		IsSpotTradingAllowed:     c.Isspottradingallowed,
-		IsMarginTradingAllowed:   c.Ismargintradingallowed,
-		QuoteAmountPrecision:     fmt.Sprintf("%f", c.Quoteamountprecision),
-		BaseSizePrecision:        strconv.FormatFloat(c.Basesizeprecision, 'f', -1, 64),
-		Permissions:              c.Permissions,
-		Filters: []mexc.SymbolFilter{},
+		Symbol:                     c.Symbol,
+		Status:                     strconv.Itoa(c.Status),
+		BaseAsset:                  c.Baseasset,
+		BaseAssetPrecision:         c.Baseassetprecision,
+		QuoteAsset:                 c.Quoteasset,
+		QuotePrecision:             c.Quoteprecision,
+		QuoteAssetPrecision:        c.Quoteassetprecision,
+		BaseCommissionPrecision:    c.Basecommissionprecision,
+		QuoteCommissionPrecision:   c.Quotecommissionprecision,
+		OrderTypes:                 c.Ordertypes,
+		IsSpotTradingAllowed:       c.Isspottradingallowed,
+		IsMarginTradingAllowed:     c.Ismargintradingallowed,
+		QuoteAmountPrecision:       fmt.Sprintf("%f", c.Quoteamountprecision),
+		BaseSizePrecision:          strconv.FormatFloat(c.Basesizeprecision, 'f', -1, 64),
+		Permissions:                c.Permissions,
+		Filters:                    []mexc.SymbolFilter{},
 		MaxQuoteAmount:             strconv.Itoa(c.Maxquoteamount),
 		MakerCommission:            strconv.FormatFloat(c.Makercommission, 'f', -1, 64),
 		TakerCommission:            strconv.FormatFloat(c.Takercommission, 'f', -1, 64),

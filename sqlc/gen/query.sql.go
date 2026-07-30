@@ -912,6 +912,38 @@ func (q *Queries) TrendSignalWasSent(ctx context.Context, arg TrendSignalWasSent
 	return sent, err
 }
 
+const updateAmountTradeLog = `-- name: UpdateAmountTradeLog :exec
+UPDATE trade_log
+SET amount = $1
+WHERE id = $2
+`
+
+type UpdateAmountTradeLogParams struct {
+	Amount float64
+	ID     int
+}
+
+func (q *Queries) UpdateAmountTradeLog(ctx context.Context, arg UpdateAmountTradeLogParams) error {
+	_, err := q.db.Exec(ctx, updateAmountTradeLog, arg.Amount, arg.ID)
+	return err
+}
+
+const updateAmountTradeLogManual = `-- name: UpdateAmountTradeLogManual :exec
+UPDATE trade_log_manual
+SET amount = $1
+WHERE id = $2
+`
+
+type UpdateAmountTradeLogManualParams struct {
+	Amount float64
+	ID     int
+}
+
+func (q *Queries) UpdateAmountTradeLogManual(ctx context.Context, arg UpdateAmountTradeLogManualParams) error {
+	_, err := q.db.Exec(ctx, updateAmountTradeLogManual, arg.Amount, arg.ID)
+	return err
+}
+
 const updateCancelDateTradeLog = `-- name: UpdateCancelDateTradeLog :exec
 UPDATE trade_log
 SET cancel_date = $1

@@ -149,6 +149,11 @@ UPDATE trade_log
 SET orderId_sell = $1
 WHERE id = $2;
 
+-- name: UpdateAmountTradeLog :exec
+UPDATE trade_log
+SET amount = $1
+WHERE id = $2;
+
 -- name: UpdateSuccesTradeLog :exec
 UPDATE trade_log
 SET close_date = $1, close_balance = $2, sell_price = $3
@@ -199,6 +204,11 @@ WHERE id = $2;
 -- name: UpdateSellOrderIdTradeLogManual :exec
 UPDATE trade_log_manual
 SET orderId_sell = $1
+WHERE id = $2;
+
+-- name: UpdateAmountTradeLogManual :exec
+UPDATE trade_log_manual
+SET amount = $1
 WHERE id = $2;
 
 -- name: UpdateSuccesTradeLogManual :exec

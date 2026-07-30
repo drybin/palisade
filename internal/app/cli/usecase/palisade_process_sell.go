@@ -37,9 +37,9 @@ func NewPalisadeProcessSellUsecase(
 	telegramApi *webapi.TelegramWebapi,
 ) *PalisadeProcessSell {
 	return &PalisadeProcessSell{
-		repo:        repo,
-		stateRepo:   stateRepo,
-		telegramApi: telegramApi,
+		repo:         repo,
+		stateRepo:    stateRepo,
+		telegramApi:  telegramApi,
 		useManualLog: false,
 	}
 }
@@ -97,11 +97,111 @@ func (u *PalisadeProcessSell) persistSellOrderID(ctx context.Context, id int, se
 	return u.stateRepo.UpdateSellOrderIdTradeLog(ctx, id, sellID)
 }
 
+func (u *PalisadeProcessSell) persistAmount(ctx context.Context, id int, amount float64) error {
+	if u.useManualLog {
+		return u.stateRepo.UpdateAmountTradeLogManual(ctx, id, amount)
+	}
+	return u.stateRepo.UpdateAmountTradeLog(ctx, id, amount)
+}
+
 func (u *PalisadeProcessSell) persistDealDate(ctx context.Context, id int, dealTime time.Time) error {
 	if u.useManualLog {
 		return u.stateRepo.UpdateDealDateTradeLogManual(ctx, id, dealTime)
 	}
 	return u.stateRepo.UpdateDealDateTradeLog(ctx, id, dealTime)
+}
+
+func (u *PalisadeProcessSell) sellQuantity(ctx context.Context, symbol string, requested float64) (float64, error) {
+	symbolInfo, err := u.repo.GetSymbolInfo(ctx, symbol)
+	if err != nil {
+		return 0, wrap.Errorf("failed to get symbol info for %s: %w", symbol, err)
+	}
+
+	for i := range symbolInfo.Symbols {
+		if symbolInfo.Symbols[i].Symbol != symbol {
+			continue
+		}
+		available := requested
+		accountInfo, err := u.repo.GetBalance(ctx)
+		if err != nil {
+			return 0, wrap.Errorf("failed to get balance before selling %s: %w", symbol, err)
+		}
+		foundBalance := false
+		for _, balance := range accountInfo.Balances {
+			if balance.Asset == symbolInfo.Symbols[i].BaseAsset {
+				foundBalance = true
+				if balance.Available < available {
+					available = balance.Available
+				}
+				break
+			}
+		}
+		if !foundBalance {
+			return 0, wrap.Errorf("balance for base asset %s not found", symbolInfo.Symbols[i].BaseAsset)
+		}
+		step, err := swapLotStep(&symbolInfo.Symbols[i])
+		if err != nil {
+			return 0, wrap.Errorf("no valid lot step for %s: %w", symbol, err)
+		}
+		quantity := math.Floor(available/step) * step
+		if quantity <= 0 {
+			return 0, wrap.Errorf("rounded sell quantity for %s is zero", symbol)
+		}
+		return quantity, nil
+	}
+
+	return 0, wrap.Errorf("symbol %s not found in exchange info", symbol)
+}
+
+func (u *PalisadeProcessSell) placeLimitSell(ctx context.Context, dbOrder repo.TradeLog, quantity float64) error {
+	nextOrderId, err := u.nextTradeClientID(ctx)
+	if err != nil {
+		return wrap.Errorf("failed to get next trade id: %w", err)
+	}
+	clientOrderId := fmt.Sprintf("%s_order_sell_%d", u.clientOrderPrefix(), nextOrderId)
+
+	placeOrderResult, err := u.repo.NewOrder(
+		model.OrderParams{
+			Symbol:           dbOrder.Symbol,
+			Side:             order.SELL,
+			OrderType:        order.LIMIT,
+			Quantity:         quantity,
+			QuoteOrderQty:    quantity,
+			Price:            dbOrder.UpLevel,
+			NewClientOrderId: clientOrderId,
+		},
+	)
+	if err != nil {
+		return wrap.Errorf("failed to place partial sell order: %w", err)
+	}
+
+	if err := u.persistSellOrderID(ctx, dbOrder.ID, placeOrderResult.OrderID); err != nil {
+		return wrap.Errorf("failed to save sell order id: %w", err)
+	}
+	if err := u.persistDealDate(ctx, dbOrder.ID, helpers.NowGMT7()); err != nil {
+		return wrap.Errorf("failed to update deal date for trade log id %d: %w", dbOrder.ID, err)
+	}
+
+	sellOrderTime := helpers.NowGMT7()
+	sellMessage := fmt.Sprintf(
+		"<b>💸 Лимит на продажу</b> %s · sell <code>%s</code> @ %s · qty %s · ~%s USDT · buy <code>%s</code> · %s×%s · открыт %s · %s",
+		dbOrder.Symbol,
+		placeOrderResult.OrderID,
+		helpers.FormatFloatTrimZeros(dbOrder.UpLevel),
+		helpers.FormatFloatTrimZeros(quantity),
+		helpers.FormatFloatTrimZeros(dbOrder.UpLevel*quantity),
+		dbOrder.OrderId,
+		helpers.FormatFloatTrimZeros(dbOrder.BuyPrice),
+		helpers.FormatFloatTrimZeros(quantity),
+		dbOrder.OpenDate.Format("2006-01-02 15:04:05"),
+		sellOrderTime.Format("2006-01-02 15:04:05 MST"),
+	)
+	if _, err := u.telegramApi.Send(sellMessage); err != nil {
+		fmt.Printf("⚠️ Не удалось отправить сообщение в Telegram: %v\n", err)
+	}
+
+	fmt.Printf("\n✅ Лимитный ордер на частично купленный объём размещён: %s, qty %.8f\n", placeOrderResult.OrderID, quantity)
+	return nil
 }
 
 func (u *PalisadeProcessSell) Process(ctx context.Context) error {
@@ -639,6 +739,19 @@ func (u *PalisadeProcessSell) Process(ctx context.Context) error {
 	case "PARTIALLY_CANCELED":
 		fmt.Printf("   ⚠️  Ордер частично отменен (PARTIALLY_CANCELED)\n")
 		updateTime := helpers.NowGMT7()
+		executedQty, parseErr := strconv.ParseFloat(queryResult.ExecutedQty, 64)
+		if parseErr != nil || executedQty <= 0 {
+			return wrap.Errorf("invalid executed quantity for partially canceled order %s: %q", queryResult.OrderID, queryResult.ExecutedQty)
+		}
+
+		quantity, err := u.sellQuantity(ctx, dbOrder.Symbol, executedQty)
+		if err != nil {
+			return err
+		}
+		if err = u.persistAmount(ctx, dbOrder.ID, quantity); err != nil {
+			return wrap.Errorf("failed to save partial executed amount for trade log id %d: %w", dbOrder.ID, err)
+		}
+		dbOrder.Amount = quantity
 
 		// Отправляем сообщение в Telegram
 		message := fmt.Sprintf(
@@ -655,6 +768,10 @@ func (u *PalisadeProcessSell) Process(ctx context.Context) error {
 		_, err = u.telegramApi.Send(message)
 		if err != nil {
 			fmt.Printf("⚠️  Не удалось отправить сообщение в Telegram: %v\n", err)
+		}
+
+		if err = u.placeLimitSell(ctx, dbOrder, quantity); err != nil {
+			return err
 		}
 	default:
 		updateTime := helpers.NowGMT7()

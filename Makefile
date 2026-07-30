@@ -36,7 +36,7 @@ genmocks:
 .PHONY: genmocks
 gensqlc:
 	$(call _info,"Generating sqlc...")
-	@docker run --rm -v $(pwd)/sqlc:/src -w /src sqlc/sqlc generate
+	@docker run --rm -v "$(CURDIR)/sqlc:/src" -w /src sqlc/sqlc:1.30.0 generate
 
 ################################################################################################################
 .PHONY: build
