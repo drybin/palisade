@@ -69,3 +69,26 @@ func TestBuildPalisadeSignal_rejectsTrend(t *testing.T) {
 		t.Fatal("expected trending market to be rejected")
 	}
 }
+
+func TestBuildPalisadeSignal_rejectsPriceBelowSupport(t *testing.T) {
+	now := time.Now().UTC()
+	klines := make(mexc.Klines, 0, 96)
+	for i := 0; i < 96; i++ {
+		price := 100.0
+		if i%8 == 4 {
+			price = 102.0
+		}
+		open := now.Add(-time.Duration(96-i) * 15 * time.Minute)
+		klines = append(klines, mexc.Kline{
+			OpenTime: open.UnixMilli(), Open: price, High: price + 0.1,
+			Low: price - 0.1, Close: price,
+			CloseTime: open.Add(15 * time.Minute).UnixMilli(),
+		})
+	}
+
+	snapshot := repo.MarketSnapshot{Symbol: "BELOWUSDT", BidPrice: 98, AskPrice: 98.1, QuoteVolume24h: 100000}
+	symbol := mexc.SymbolDetail{Symbol: "BELOWUSDT", MakerCommission: "0", TakerCommission: "0"}
+	if _, ok := buildPalisadeSignal(snapshot, symbol, klines, now); ok {
+		t.Fatal("expected price below support to be rejected")
+	}
+}

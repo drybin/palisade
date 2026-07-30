@@ -66,6 +66,12 @@ func (u *ScorePalisadeCandidates) Process(ctx context.Context, debug bool) error
 
 	candidates := make([]palisadeSignal, 0, maxSignalCandidates)
 	for _, snapshot := range snapshots {
+		if snapshot.CollectedAt.IsZero() || time.Since(snapshot.CollectedAt) > 5*time.Minute {
+			if debug {
+				fmt.Printf("%s: снимок рынка устарел\n", snapshot.Symbol)
+			}
+			continue
+		}
 		if snapshot.QuoteVolume24h < minSignalVolume24h || snapshot.BidPrice <= 0 || snapshot.AskPrice <= snapshot.BidPrice {
 			continue
 		}
@@ -159,7 +165,7 @@ func buildPalisadeSignal(snapshot repo.MarketSnapshot, symbol mexc.SymbolDetail,
 	}
 	rangeValue := resistance - support
 	current := (snapshot.BidPrice + snapshot.AskPrice) / 2
-	if current > support+rangeValue*0.30 {
+	if current < support || current > support+rangeValue*0.30 {
 		return palisadeSignal{}, false
 	}
 	first := closed[0].Close
