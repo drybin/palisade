@@ -92,3 +92,23 @@ func TestBuildPalisadeSignal_rejectsPriceBelowSupport(t *testing.T) {
 		t.Fatal("expected price below support to be rejected")
 	}
 }
+
+func TestCalculateDynamicTarget_rejectsTargetBelowMinimumExit(t *testing.T) {
+	target, minExit, ok := calculateDynamicTarget(100, 101, 0.001, 0.003)
+	if ok {
+		t.Fatal("expected target below minimum exit to be rejected")
+	}
+	if target <= 0 || minExit <= target {
+		t.Fatalf("expected positive minimum exit above target, got target=%.4f minExit=%.4f", target, minExit)
+	}
+}
+
+func TestCalculateDynamicTarget_acceptsTargetWithMinimumProfit(t *testing.T) {
+	target, minExit, ok := calculateDynamicTarget(100, 103, 0.0005, 0.001)
+	if !ok {
+		t.Fatal("expected target with minimum profit to be accepted")
+	}
+	if target < minExit {
+		t.Fatalf("expected target >= minimum exit, got target=%.4f minExit=%.4f", target, minExit)
+	}
+}

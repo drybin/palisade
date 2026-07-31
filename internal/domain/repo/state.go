@@ -27,7 +27,73 @@ type MarketSnapshot struct {
 	PriceChangePercent float64
 }
 
+type PalisadeSignalState struct {
+	Symbol             string
+	EntryPrice         float64
+	TargetPrice        float64
+	MinExitPrice       float64
+	NetProfit          float64
+	Score              int
+	Status             string
+	InvalidationReason string
+	ValidUntil         time.Time
+	UpdatedAt          time.Time
+}
+
+type OrderIntent struct {
+	ID                 int
+	ClientOrderID      string
+	Symbol             string
+	Side               string
+	Price              float64
+	Quantity           float64
+	OpenBalance        float64
+	TargetPrice        float64
+	Status             string
+	ExchangeOrderID    string
+	TradeID            int
+	ExecutedQuantity   float64
+	CumulativeQuoteQty float64
+	LastError          string
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
+}
+
+type PaperTrade struct {
+	ID             int
+	Symbol         string
+	SignalAt       time.Time
+	Status         string
+	EntryPrice     float64
+	TargetPrice    float64
+	MinExitPrice   float64
+	Quantity       float64
+	FilledQuantity float64
+	SoldQuantity   float64
+	BuyQuote       float64
+	SellQuote      float64
+	Fees           float64
+	PnL            float64
+	OpenedAt       *time.Time
+	ClosedAt       *time.Time
+	ExitReason     string
+	LastPrice      float64
+	UpdatedAt      time.Time
+}
+
+type PaperTradeStats struct {
+	Total      int
+	Closed     int
+	Open       int
+	TotalPnL   float64
+	AveragePnL float64
+	Wins       int
+	Losses     int
+}
+
 type IStateRepository interface {
+	TryAcquireTradingLock(context.Context, string) (bool, error)
+	ReleaseTradingLock(context.Context, string) error
 	GetCoinState(context.Context, model.Coin, model.Coin) (*model.State, error)
 	GetCountLogsByCoin(context.Context, model.Coin, model.Coin) (*int, error)
 	SaveCoin(context.Context, *mexc.SymbolDetail) error
@@ -39,6 +105,8 @@ type IStateRepository interface {
 	UpdatePalisadeParams(context.Context, string, float64, float64, float64, float64, float64, float64, float64, float64) error
 	GetNextTradeId(context.Context) (int, error)
 	SaveTradeLog(context.Context, SaveTradeLogParams) (*TradeLog, error)
+	UpdateTradeLevels(context.Context, int, float64, float64) error
+	UpdateTradeFill(context.Context, int, float64, float64) error
 	UpdateDealDateTradeLog(context.Context, int, time.Time) error
 	UpdateCancelDateTradeLog(context.Context, int, time.Time) error
 	UpdateAmountTradeLog(context.Context, int, float64) error
@@ -59,6 +127,18 @@ type IStateRepository interface {
 	ListMarketSnapshots(context.Context) ([]MarketSnapshot, error)
 	GetLastPalisadeSignal(context.Context, string) (*time.Time, error)
 	SavePalisadeSignal(context.Context, string, time.Time, float64) error
+	SavePalisadeSignalState(context.Context, PalisadeSignalState) error
+	ListActivePalisadeSignals(context.Context) ([]PalisadeSignalState, error)
+	CreateOrderIntent(context.Context, OrderIntent) (*OrderIntent, error)
+	UpdateOrderIntent(context.Context, int, string, string, float64, float64, string) error
+	UpdateOrderIntentTradeID(context.Context, int, int) error
+	ListRecoverableOrderIntents(context.Context) ([]OrderIntent, error)
+	ListOrderIntentsByTradeID(context.Context, int) ([]OrderIntent, error)
+	GetOpenPaperTradeBySymbol(context.Context, string) (*PaperTrade, error)
+	ListOpenPaperTrades(context.Context) ([]PaperTrade, error)
+	CreatePaperTrade(context.Context, PaperTrade) (*PaperTrade, error)
+	UpdatePaperTrade(context.Context, PaperTrade) error
+	GetPaperTradeStats(context.Context) (PaperTradeStats, error)
 }
 
 type SaveTradeLogParams struct {

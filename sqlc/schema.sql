@@ -132,10 +132,64 @@ CREATE TABLE market_snapshot (
 );
 
 CREATE TABLE palisade_signal (
-    symbol       TEXT PRIMARY KEY,
-    sent_at      TIMESTAMPTZ NOT NULL,
-    score        DOUBLE PRECISION NOT NULL
+	symbol                TEXT PRIMARY KEY,
+	sent_at               TIMESTAMPTZ NOT NULL,
+	score                 DOUBLE PRECISION NOT NULL,
+	entry_price           DOUBLE PRECISION NOT NULL DEFAULT 0,
+	target_price          DOUBLE PRECISION NOT NULL DEFAULT 0,
+	min_exit_price        DOUBLE PRECISION NOT NULL DEFAULT 0,
+	net_profit            DOUBLE PRECISION NOT NULL DEFAULT 0,
+	status                TEXT NOT NULL DEFAULT 'ACTIVE',
+	invalidation_reason   TEXT NOT NULL DEFAULT '',
+	valid_until           TIMESTAMPTZ NOT NULL DEFAULT now(),
+	updated_at            TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+CREATE TABLE palisade_order_intent (
+    id                    SERIAL PRIMARY KEY,
+    client_order_id       TEXT NOT NULL UNIQUE,
+    symbol                TEXT NOT NULL,
+    side                  TEXT NOT NULL,
+    price                 DOUBLE PRECISION NOT NULL,
+    quantity              DOUBLE PRECISION NOT NULL,
+    open_balance          DOUBLE PRECISION NOT NULL DEFAULT 0,
+    target_price          DOUBLE PRECISION NOT NULL DEFAULT 0,
+    status                TEXT NOT NULL,
+    exchange_order_id     TEXT NOT NULL DEFAULT '',
+    trade_id              INT,
+    executed_quantity     DOUBLE PRECISION NOT NULL DEFAULT 0,
+    cumulative_quote_qty DOUBLE PRECISION NOT NULL DEFAULT 0,
+    last_error            TEXT NOT NULL DEFAULT '',
+    created_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at            TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX palisade_order_intent_recovery_idx
+    ON palisade_order_intent (status, updated_at);
+
+CREATE TABLE paper_trade (
+    id              SERIAL PRIMARY KEY,
+    symbol          TEXT NOT NULL,
+    signal_at       TIMESTAMPTZ NOT NULL,
+    status          TEXT NOT NULL,
+    entry_price     DOUBLE PRECISION NOT NULL,
+    target_price    DOUBLE PRECISION NOT NULL,
+    min_exit_price  DOUBLE PRECISION NOT NULL,
+    quantity        DOUBLE PRECISION NOT NULL,
+    filled_quantity DOUBLE PRECISION NOT NULL DEFAULT 0,
+    sold_quantity   DOUBLE PRECISION NOT NULL DEFAULT 0,
+    buy_quote      DOUBLE PRECISION NOT NULL DEFAULT 0,
+    sell_quote     DOUBLE PRECISION NOT NULL DEFAULT 0,
+    fees            DOUBLE PRECISION NOT NULL DEFAULT 0,
+    pnl             DOUBLE PRECISION NOT NULL DEFAULT 0,
+    opened_at       TIMESTAMPTZ,
+    closed_at       TIMESTAMPTZ,
+    exit_reason     TEXT NOT NULL DEFAULT '',
+    last_price      DOUBLE PRECISION NOT NULL DEFAULT 0,
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX paper_trade_symbol_status_idx ON paper_trade (symbol, status);
 
 CREATE TABLE trend_retest_state (
     symbol                  TEXT NOT NULL,

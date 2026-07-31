@@ -104,6 +104,15 @@ func NewSwapProcessUsecase(repo *webapi.MexcWebapi, stateRepo repo.IStateReposit
 }
 
 func (u *SwapProcess) Process(ctx context.Context) error {
+	releaseLock, acquired, err := acquireTradingLock(ctx, u.stateRepo)
+	if err != nil {
+		return err
+	}
+	if !acquired {
+		return nil
+	}
+	defer releaseLock()
+
 	fmt.Println("=== swap_process: поиск выгодной связки и исполнение лимитными ордерами ===")
 
 	// --- 1. Book ticker (best bid/ask) — исполнимые цены для расчёта и лимитов ---

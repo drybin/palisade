@@ -139,6 +139,11 @@ UPDATE trade_log
 SET deal_date = $1
 WHERE id = $2;
 
+-- name: UpdateTradeLevels :exec
+UPDATE trade_log
+SET upLevel = $1, downLevel = $2
+WHERE id = $3;
+
 -- name: UpdateCancelDateTradeLog :exec
 UPDATE trade_log
 SET cancel_date = $1
@@ -153,6 +158,11 @@ WHERE id = $2;
 UPDATE trade_log
 SET amount = $1
 WHERE id = $2;
+
+-- name: UpdateTradeFill :exec
+UPDATE trade_log
+SET buy_price = $1, amount = $2
+WHERE id = $3;
 
 -- name: UpdateSuccesTradeLog :exec
 UPDATE trade_log
@@ -312,3 +322,103 @@ SELECT sent_at FROM palisade_signal WHERE symbol = $1;
 INSERT INTO palisade_signal (symbol, sent_at, score)
 VALUES ($1, $2, $3)
 ON CONFLICT (symbol) DO UPDATE SET sent_at = EXCLUDED.sent_at, score = EXCLUDED.score;
+
+-- name: SavePalisadeSignalState :exec
+UPDATE palisade_signal
+SET entry_price = $2,
+    target_price = $3,
+    min_exit_price = $4,
+    net_profit = $5,
+    score = $6,
+    status = $7,
+    invalidation_reason = $8,
+    valid_until = $9,
+    updated_at = $10
+WHERE symbol = $1;
+
+-- name: ListActivePalisadeSignals :many
+SELECT symbol, entry_price, target_price, min_exit_price, net_profit, score,
+       status, invalidation_reason, valid_until, updated_at
+FROM palisade_signal
+WHERE status = 'ACTIVE'
+  AND valid_until > now()
+  AND target_price >= min_exit_price
+ORDER BY score DESC, updated_at DESC;
+
+-- name: CreateOrderIntent :one
+INSERT INTO palisade_order_intent (
+    client_order_id, symbol, side, price, quantity, open_balance, target_price, status,
+    exchange_order_id, trade_id, executed_quantity, cumulative_quote_qty, last_error,
+    created_at, updated_at
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+RETURNING *;
+
+-- name: UpdateOrderIntent :exec
+UPDATE palisade_order_intent
+SET status = $2,
+    exchange_order_id = $3,
+    executed_quantity = $4,
+    cumulative_quote_qty = $5,
+    last_error = $6,
+    updated_at = now()
+WHERE id = $1;
+
+-- name: UpdateOrderIntentTradeID :exec
+UPDATE palisade_order_intent SET trade_id = $2, updated_at = now() WHERE id = $1;
+
+-- name: ListRecoverableOrderIntents :many
+SELECT * FROM palisade_order_intent
+WHERE status IN ('PLACING', 'UNKNOWN', 'ACKNOWLEDGED', 'RECOVERY_REQUIRED')
+ORDER BY created_at;
+
+-- name: ListOrderIntentsByTradeID :many
+SELECT * FROM palisade_order_intent
+WHERE trade_id = $1
+ORDER BY id;
+
+-- name: GetOpenPaperTradeBySymbol :one
+SELECT * FROM paper_trade
+WHERE symbol = $1 AND status IN ('BUY_PENDING', 'POSITION_OPEN', 'SELL_PENDING')
+ORDER BY id DESC
+LIMIT 1;
+
+-- name: CreatePaperTrade :one
+INSERT INTO paper_trade (
+    symbol, signal_at, status, entry_price, target_price, min_exit_price, quantity,
+    filled_quantity, sold_quantity, buy_quote, sell_quote, fees, pnl, opened_at,
+    closed_at, exit_reason, last_price, updated_at
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+RETURNING *;
+
+-- name: ListOpenPaperTrades :many
+SELECT * FROM paper_trade
+WHERE status IN ('BUY_PENDING', 'POSITION_OPEN', 'SELL_PENDING')
+ORDER BY id;
+
+-- name: UpdatePaperTrade :exec
+UPDATE paper_trade SET
+    status = $2,
+    target_price = $3,
+    filled_quantity = $4,
+    sold_quantity = $5,
+    buy_quote = $6,
+    sell_quote = $7,
+    fees = $8,
+    pnl = $9,
+    opened_at = $10,
+    closed_at = $11,
+    exit_reason = $12,
+    last_price = $13,
+    updated_at = $14
+WHERE id = $1;
+
+-- name: GetPaperTradeStats :one
+SELECT
+    COUNT(*)::int AS total,
+    COUNT(*) FILTER (WHERE status = 'CLOSED')::int AS closed,
+    COUNT(*) FILTER (WHERE status IN ('BUY_PENDING', 'POSITION_OPEN', 'SELL_PENDING'))::int AS open,
+    COALESCE(SUM(pnl) FILTER (WHERE status = 'CLOSED'), 0)::double precision AS total_pnl,
+    COALESCE(AVG(pnl) FILTER (WHERE status = 'CLOSED'), 0)::double precision AS average_pnl,
+    COUNT(*) FILTER (WHERE status = 'CLOSED' AND pnl > 0)::int AS wins,
+    COUNT(*) FILTER (WHERE status = 'CLOSED' AND pnl < 0)::int AS losses
+FROM paper_trade;

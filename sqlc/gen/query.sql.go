@@ -23,6 +23,149 @@ func (q *Queries) CountMarketDailyBars(ctx context.Context, symbol string) (int6
 	return column_1, err
 }
 
+const createOrderIntent = `-- name: CreateOrderIntent :one
+INSERT INTO palisade_order_intent (
+    client_order_id, symbol, side, price, quantity, open_balance, target_price, status,
+    exchange_order_id, trade_id, executed_quantity, cumulative_quote_qty, last_error,
+    created_at, updated_at
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+RETURNING id, client_order_id, symbol, side, price, quantity, open_balance, target_price, status, exchange_order_id, trade_id, executed_quantity, cumulative_quote_qty, last_error, created_at, updated_at
+`
+
+type CreateOrderIntentParams struct {
+	ClientOrderID      string
+	Symbol             string
+	Side               string
+	Price              float64
+	Quantity           float64
+	OpenBalance        float64
+	TargetPrice        float64
+	Status             string
+	ExchangeOrderID    string
+	TradeID            pgtype.Int4
+	ExecutedQuantity   float64
+	CumulativeQuoteQty float64
+	LastError          string
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
+}
+
+func (q *Queries) CreateOrderIntent(ctx context.Context, arg CreateOrderIntentParams) (PalisadeOrderIntent, error) {
+	row := q.db.QueryRow(ctx, createOrderIntent,
+		arg.ClientOrderID,
+		arg.Symbol,
+		arg.Side,
+		arg.Price,
+		arg.Quantity,
+		arg.OpenBalance,
+		arg.TargetPrice,
+		arg.Status,
+		arg.ExchangeOrderID,
+		arg.TradeID,
+		arg.ExecutedQuantity,
+		arg.CumulativeQuoteQty,
+		arg.LastError,
+		arg.CreatedAt,
+		arg.UpdatedAt,
+	)
+	var i PalisadeOrderIntent
+	err := row.Scan(
+		&i.ID,
+		&i.ClientOrderID,
+		&i.Symbol,
+		&i.Side,
+		&i.Price,
+		&i.Quantity,
+		&i.OpenBalance,
+		&i.TargetPrice,
+		&i.Status,
+		&i.ExchangeOrderID,
+		&i.TradeID,
+		&i.ExecutedQuantity,
+		&i.CumulativeQuoteQty,
+		&i.LastError,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const createPaperTrade = `-- name: CreatePaperTrade :one
+INSERT INTO paper_trade (
+    symbol, signal_at, status, entry_price, target_price, min_exit_price, quantity,
+    filled_quantity, sold_quantity, buy_quote, sell_quote, fees, pnl, opened_at,
+    closed_at, exit_reason, last_price, updated_at
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+RETURNING id, symbol, signal_at, status, entry_price, target_price, min_exit_price, quantity, filled_quantity, sold_quantity, buy_quote, sell_quote, fees, pnl, opened_at, closed_at, exit_reason, last_price, updated_at
+`
+
+type CreatePaperTradeParams struct {
+	Symbol         string
+	SignalAt       time.Time
+	Status         string
+	EntryPrice     float64
+	TargetPrice    float64
+	MinExitPrice   float64
+	Quantity       float64
+	FilledQuantity float64
+	SoldQuantity   float64
+	BuyQuote       float64
+	SellQuote      float64
+	Fees           float64
+	Pnl            float64
+	OpenedAt       *time.Time
+	ClosedAt       *time.Time
+	ExitReason     string
+	LastPrice      float64
+	UpdatedAt      time.Time
+}
+
+func (q *Queries) CreatePaperTrade(ctx context.Context, arg CreatePaperTradeParams) (PaperTrade, error) {
+	row := q.db.QueryRow(ctx, createPaperTrade,
+		arg.Symbol,
+		arg.SignalAt,
+		arg.Status,
+		arg.EntryPrice,
+		arg.TargetPrice,
+		arg.MinExitPrice,
+		arg.Quantity,
+		arg.FilledQuantity,
+		arg.SoldQuantity,
+		arg.BuyQuote,
+		arg.SellQuote,
+		arg.Fees,
+		arg.Pnl,
+		arg.OpenedAt,
+		arg.ClosedAt,
+		arg.ExitReason,
+		arg.LastPrice,
+		arg.UpdatedAt,
+	)
+	var i PaperTrade
+	err := row.Scan(
+		&i.ID,
+		&i.Symbol,
+		&i.SignalAt,
+		&i.Status,
+		&i.EntryPrice,
+		&i.TargetPrice,
+		&i.MinExitPrice,
+		&i.Quantity,
+		&i.FilledQuantity,
+		&i.SoldQuantity,
+		&i.BuyQuote,
+		&i.SellQuote,
+		&i.Fees,
+		&i.Pnl,
+		&i.OpenedAt,
+		&i.ClosedAt,
+		&i.ExitReason,
+		&i.LastPrice,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getCoinInfo = `-- name: GetCoinInfo :one
 SELECT id, date, symbol, status, baseasset, baseassetprecision, quoteasset, quoteprecision, quoteassetprecision, basecommissionprecision, quotecommissionprecision, ordertypes, isspottradingallowed, ismargintradingallowed, quoteamountprecision, basesizeprecision, permissions, maxquoteamount, makercommission, takercommission, quoteamountprecisionmarket, maxquoteamountmarket, fullname, tradesidetype, ispalisade, lastcheck, support, resistance, rangevalue, rangepercent, avgprice, volatility, maxdrawdown, maxrise FROM coins
 WHERE symbol = $1 LIMIT 1
@@ -474,6 +617,77 @@ func (q *Queries) GetOpenOrdersManual(ctx context.Context) ([]TradeLogManual, er
 	return items, nil
 }
 
+const getOpenPaperTradeBySymbol = `-- name: GetOpenPaperTradeBySymbol :one
+SELECT id, symbol, signal_at, status, entry_price, target_price, min_exit_price, quantity, filled_quantity, sold_quantity, buy_quote, sell_quote, fees, pnl, opened_at, closed_at, exit_reason, last_price, updated_at FROM paper_trade
+WHERE symbol = $1 AND status IN ('BUY_PENDING', 'POSITION_OPEN', 'SELL_PENDING')
+ORDER BY id DESC
+LIMIT 1
+`
+
+func (q *Queries) GetOpenPaperTradeBySymbol(ctx context.Context, symbol string) (PaperTrade, error) {
+	row := q.db.QueryRow(ctx, getOpenPaperTradeBySymbol, symbol)
+	var i PaperTrade
+	err := row.Scan(
+		&i.ID,
+		&i.Symbol,
+		&i.SignalAt,
+		&i.Status,
+		&i.EntryPrice,
+		&i.TargetPrice,
+		&i.MinExitPrice,
+		&i.Quantity,
+		&i.FilledQuantity,
+		&i.SoldQuantity,
+		&i.BuyQuote,
+		&i.SellQuote,
+		&i.Fees,
+		&i.Pnl,
+		&i.OpenedAt,
+		&i.ClosedAt,
+		&i.ExitReason,
+		&i.LastPrice,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getPaperTradeStats = `-- name: GetPaperTradeStats :one
+SELECT
+    COUNT(*)::int AS total,
+    COUNT(*) FILTER (WHERE status = 'CLOSED')::int AS closed,
+    COUNT(*) FILTER (WHERE status IN ('BUY_PENDING', 'POSITION_OPEN', 'SELL_PENDING'))::int AS open,
+    COALESCE(SUM(pnl) FILTER (WHERE status = 'CLOSED'), 0)::double precision AS total_pnl,
+    COALESCE(AVG(pnl) FILTER (WHERE status = 'CLOSED'), 0)::double precision AS average_pnl,
+    COUNT(*) FILTER (WHERE status = 'CLOSED' AND pnl > 0)::int AS wins,
+    COUNT(*) FILTER (WHERE status = 'CLOSED' AND pnl < 0)::int AS losses
+FROM paper_trade
+`
+
+type GetPaperTradeStatsRow struct {
+	Total      int
+	Closed     int
+	Open       int
+	TotalPnl   float64
+	AveragePnl float64
+	Wins       int
+	Losses     int
+}
+
+func (q *Queries) GetPaperTradeStats(ctx context.Context) (GetPaperTradeStatsRow, error) {
+	row := q.db.QueryRow(ctx, getPaperTradeStats)
+	var i GetPaperTradeStatsRow
+	err := row.Scan(
+		&i.Total,
+		&i.Closed,
+		&i.Open,
+		&i.TotalPnl,
+		&i.AveragePnl,
+		&i.Wins,
+		&i.Losses,
+	)
+	return i, err
+}
+
 const getTradeLogManualById = `-- name: GetTradeLogManualById :one
 SELECT id, open_date, deal_date, close_date, cancel_date, open_balance, close_balance, symbol, buy_price, sell_price, amount, orderid, orderid_sell, uplevel, downlevel FROM trade_log_manual WHERE id = $1
 `
@@ -546,6 +760,60 @@ func (q *Queries) InsertTrendSignalSent(ctx context.Context, arg InsertTrendSign
 		arg.SignalKind,
 	)
 	return err
+}
+
+const listActivePalisadeSignals = `-- name: ListActivePalisadeSignals :many
+SELECT symbol, entry_price, target_price, min_exit_price, net_profit, score,
+       status, invalidation_reason, valid_until, updated_at
+FROM palisade_signal
+WHERE status = 'ACTIVE'
+  AND valid_until > now()
+  AND target_price >= min_exit_price
+ORDER BY score DESC, updated_at DESC
+`
+
+type ListActivePalisadeSignalsRow struct {
+	Symbol             string
+	EntryPrice         float64
+	TargetPrice        float64
+	MinExitPrice       float64
+	NetProfit          float64
+	Score              float64
+	Status             string
+	InvalidationReason string
+	ValidUntil         time.Time
+	UpdatedAt          time.Time
+}
+
+func (q *Queries) ListActivePalisadeSignals(ctx context.Context) ([]ListActivePalisadeSignalsRow, error) {
+	rows, err := q.db.Query(ctx, listActivePalisadeSignals)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListActivePalisadeSignalsRow
+	for rows.Next() {
+		var i ListActivePalisadeSignalsRow
+		if err := rows.Scan(
+			&i.Symbol,
+			&i.EntryPrice,
+			&i.TargetPrice,
+			&i.MinExitPrice,
+			&i.NetProfit,
+			&i.Score,
+			&i.Status,
+			&i.InvalidationReason,
+			&i.ValidUntil,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listMarketDailyBars = `-- name: ListMarketDailyBars :many
@@ -638,6 +906,138 @@ func (q *Queries) ListMarketSnapshots(ctx context.Context) ([]MarketSnapshot, er
 			&i.AskQty,
 			&i.QuoteVolume24h,
 			&i.PriceChangePercent,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listOpenPaperTrades = `-- name: ListOpenPaperTrades :many
+SELECT id, symbol, signal_at, status, entry_price, target_price, min_exit_price, quantity, filled_quantity, sold_quantity, buy_quote, sell_quote, fees, pnl, opened_at, closed_at, exit_reason, last_price, updated_at FROM paper_trade
+WHERE status IN ('BUY_PENDING', 'POSITION_OPEN', 'SELL_PENDING')
+ORDER BY id
+`
+
+func (q *Queries) ListOpenPaperTrades(ctx context.Context) ([]PaperTrade, error) {
+	rows, err := q.db.Query(ctx, listOpenPaperTrades)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []PaperTrade
+	for rows.Next() {
+		var i PaperTrade
+		if err := rows.Scan(
+			&i.ID,
+			&i.Symbol,
+			&i.SignalAt,
+			&i.Status,
+			&i.EntryPrice,
+			&i.TargetPrice,
+			&i.MinExitPrice,
+			&i.Quantity,
+			&i.FilledQuantity,
+			&i.SoldQuantity,
+			&i.BuyQuote,
+			&i.SellQuote,
+			&i.Fees,
+			&i.Pnl,
+			&i.OpenedAt,
+			&i.ClosedAt,
+			&i.ExitReason,
+			&i.LastPrice,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listOrderIntentsByTradeID = `-- name: ListOrderIntentsByTradeID :many
+SELECT id, client_order_id, symbol, side, price, quantity, open_balance, target_price, status, exchange_order_id, trade_id, executed_quantity, cumulative_quote_qty, last_error, created_at, updated_at FROM palisade_order_intent
+WHERE trade_id = $1
+ORDER BY id
+`
+
+func (q *Queries) ListOrderIntentsByTradeID(ctx context.Context, tradeID pgtype.Int4) ([]PalisadeOrderIntent, error) {
+	rows, err := q.db.Query(ctx, listOrderIntentsByTradeID, tradeID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []PalisadeOrderIntent
+	for rows.Next() {
+		var i PalisadeOrderIntent
+		if err := rows.Scan(
+			&i.ID,
+			&i.ClientOrderID,
+			&i.Symbol,
+			&i.Side,
+			&i.Price,
+			&i.Quantity,
+			&i.OpenBalance,
+			&i.TargetPrice,
+			&i.Status,
+			&i.ExchangeOrderID,
+			&i.TradeID,
+			&i.ExecutedQuantity,
+			&i.CumulativeQuoteQty,
+			&i.LastError,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRecoverableOrderIntents = `-- name: ListRecoverableOrderIntents :many
+SELECT id, client_order_id, symbol, side, price, quantity, open_balance, target_price, status, exchange_order_id, trade_id, executed_quantity, cumulative_quote_qty, last_error, created_at, updated_at FROM palisade_order_intent
+WHERE status IN ('PLACING', 'UNKNOWN', 'ACKNOWLEDGED', 'RECOVERY_REQUIRED')
+ORDER BY created_at
+`
+
+func (q *Queries) ListRecoverableOrderIntents(ctx context.Context) ([]PalisadeOrderIntent, error) {
+	rows, err := q.db.Query(ctx, listRecoverableOrderIntents)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []PalisadeOrderIntent
+	for rows.Next() {
+		var i PalisadeOrderIntent
+		if err := rows.Scan(
+			&i.ID,
+			&i.ClientOrderID,
+			&i.Symbol,
+			&i.Side,
+			&i.Price,
+			&i.Quantity,
+			&i.OpenBalance,
+			&i.TargetPrice,
+			&i.Status,
+			&i.ExchangeOrderID,
+			&i.TradeID,
+			&i.ExecutedQuantity,
+			&i.CumulativeQuoteQty,
+			&i.LastError,
+			&i.CreatedAt,
+			&i.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -814,6 +1214,49 @@ type SavePalisadeSignalParams struct {
 
 func (q *Queries) SavePalisadeSignal(ctx context.Context, arg SavePalisadeSignalParams) error {
 	_, err := q.db.Exec(ctx, savePalisadeSignal, arg.Symbol, arg.SentAt, arg.Score)
+	return err
+}
+
+const savePalisadeSignalState = `-- name: SavePalisadeSignalState :exec
+UPDATE palisade_signal
+SET entry_price = $2,
+    target_price = $3,
+    min_exit_price = $4,
+    net_profit = $5,
+    score = $6,
+    status = $7,
+    invalidation_reason = $8,
+    valid_until = $9,
+    updated_at = $10
+WHERE symbol = $1
+`
+
+type SavePalisadeSignalStateParams struct {
+	Symbol             string
+	EntryPrice         float64
+	TargetPrice        float64
+	MinExitPrice       float64
+	NetProfit          float64
+	Score              float64
+	Status             string
+	InvalidationReason string
+	ValidUntil         time.Time
+	UpdatedAt          time.Time
+}
+
+func (q *Queries) SavePalisadeSignalState(ctx context.Context, arg SavePalisadeSignalStateParams) error {
+	_, err := q.db.Exec(ctx, savePalisadeSignalState,
+		arg.Symbol,
+		arg.EntryPrice,
+		arg.TargetPrice,
+		arg.MinExitPrice,
+		arg.NetProfit,
+		arg.Score,
+		arg.Status,
+		arg.InvalidationReason,
+		arg.ValidUntil,
+		arg.UpdatedAt,
+	)
 	return err
 }
 
@@ -1090,6 +1533,52 @@ func (q *Queries) UpdateIsPalisade(ctx context.Context, arg UpdateIsPalisadePara
 	return err
 }
 
+const updateOrderIntent = `-- name: UpdateOrderIntent :exec
+UPDATE palisade_order_intent
+SET status = $2,
+    exchange_order_id = $3,
+    executed_quantity = $4,
+    cumulative_quote_qty = $5,
+    last_error = $6,
+    updated_at = now()
+WHERE id = $1
+`
+
+type UpdateOrderIntentParams struct {
+	ID                 int
+	Status             string
+	ExchangeOrderID    string
+	ExecutedQuantity   float64
+	CumulativeQuoteQty float64
+	LastError          string
+}
+
+func (q *Queries) UpdateOrderIntent(ctx context.Context, arg UpdateOrderIntentParams) error {
+	_, err := q.db.Exec(ctx, updateOrderIntent,
+		arg.ID,
+		arg.Status,
+		arg.ExchangeOrderID,
+		arg.ExecutedQuantity,
+		arg.CumulativeQuoteQty,
+		arg.LastError,
+	)
+	return err
+}
+
+const updateOrderIntentTradeID = `-- name: UpdateOrderIntentTradeID :exec
+UPDATE palisade_order_intent SET trade_id = $2, updated_at = now() WHERE id = $1
+`
+
+type UpdateOrderIntentTradeIDParams struct {
+	ID      int
+	TradeID pgtype.Int4
+}
+
+func (q *Queries) UpdateOrderIntentTradeID(ctx context.Context, arg UpdateOrderIntentTradeIDParams) error {
+	_, err := q.db.Exec(ctx, updateOrderIntentTradeID, arg.ID, arg.TradeID)
+	return err
+}
+
 const updatePalisadeParams = `-- name: UpdatePalisadeParams :exec
 UPDATE coins
 SET support = $1, resistance = $2, rangeValue = $3, rangePercent = $4, avgPrice = $5, volatility = $6, maxDrawdown = $7, maxRise = $8
@@ -1119,6 +1608,61 @@ func (q *Queries) UpdatePalisadeParams(ctx context.Context, arg UpdatePalisadePa
 		arg.Maxdrawdown,
 		arg.Maxrise,
 		arg.Symbol,
+	)
+	return err
+}
+
+const updatePaperTrade = `-- name: UpdatePaperTrade :exec
+UPDATE paper_trade SET
+    status = $2,
+    target_price = $3,
+    filled_quantity = $4,
+    sold_quantity = $5,
+    buy_quote = $6,
+    sell_quote = $7,
+    fees = $8,
+    pnl = $9,
+    opened_at = $10,
+    closed_at = $11,
+    exit_reason = $12,
+    last_price = $13,
+    updated_at = $14
+WHERE id = $1
+`
+
+type UpdatePaperTradeParams struct {
+	ID             int
+	Status         string
+	TargetPrice    float64
+	FilledQuantity float64
+	SoldQuantity   float64
+	BuyQuote       float64
+	SellQuote      float64
+	Fees           float64
+	Pnl            float64
+	OpenedAt       *time.Time
+	ClosedAt       *time.Time
+	ExitReason     string
+	LastPrice      float64
+	UpdatedAt      time.Time
+}
+
+func (q *Queries) UpdatePaperTrade(ctx context.Context, arg UpdatePaperTradeParams) error {
+	_, err := q.db.Exec(ctx, updatePaperTrade,
+		arg.ID,
+		arg.Status,
+		arg.TargetPrice,
+		arg.FilledQuantity,
+		arg.SoldQuantity,
+		arg.BuyQuote,
+		arg.SellQuote,
+		arg.Fees,
+		arg.Pnl,
+		arg.OpenedAt,
+		arg.ClosedAt,
+		arg.ExitReason,
+		arg.LastPrice,
+		arg.UpdatedAt,
 	)
 	return err
 }
@@ -1198,6 +1742,40 @@ func (q *Queries) UpdateSuccesTradeLogManual(ctx context.Context, arg UpdateSucc
 		arg.SellPrice,
 		arg.ID,
 	)
+	return err
+}
+
+const updateTradeFill = `-- name: UpdateTradeFill :exec
+UPDATE trade_log
+SET buy_price = $1, amount = $2
+WHERE id = $3
+`
+
+type UpdateTradeFillParams struct {
+	BuyPrice float64
+	Amount   float64
+	ID       int
+}
+
+func (q *Queries) UpdateTradeFill(ctx context.Context, arg UpdateTradeFillParams) error {
+	_, err := q.db.Exec(ctx, updateTradeFill, arg.BuyPrice, arg.Amount, arg.ID)
+	return err
+}
+
+const updateTradeLevels = `-- name: UpdateTradeLevels :exec
+UPDATE trade_log
+SET upLevel = $1, downLevel = $2
+WHERE id = $3
+`
+
+type UpdateTradeLevelsParams struct {
+	Uplevel   float64
+	Downlevel float64
+	ID        int
+}
+
+func (q *Queries) UpdateTradeLevels(ctx context.Context, arg UpdateTradeLevelsParams) error {
+	_, err := q.db.Exec(ctx, updateTradeLevels, arg.Uplevel, arg.Downlevel, arg.ID)
 	return err
 }
 

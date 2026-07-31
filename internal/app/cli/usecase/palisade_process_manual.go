@@ -20,11 +20,11 @@ import (
 
 // ProcessManualConfig задаётся в YAML для команды process-manual.
 type ProcessManualConfig struct {
-	Symbol                string  `yaml:"symbol"`
-	Support               float64 `yaml:"support"`
-	Resistance            float64 `yaml:"resistance"`
-	QuoteUsdt             float64 `yaml:"quote_usdt"`
-	SkipPriceRangeCheck   bool    `yaml:"skip_price_range_check"`
+	Symbol              string  `yaml:"symbol"`
+	Support             float64 `yaml:"support"`
+	Resistance          float64 `yaml:"resistance"`
+	QuoteUsdt           float64 `yaml:"quote_usdt"`
+	SkipPriceRangeCheck bool    `yaml:"skip_price_range_check"`
 }
 
 type PalisadeProcessManual struct {
@@ -76,6 +76,15 @@ func findSymbolDetailManual(info *mexc.SymbolInfo, symbol string) *mexc.SymbolDe
 }
 
 func (u *PalisadeProcessManual) Process(ctx context.Context, configPath string) error {
+	releaseLock, acquired, err := acquireTradingLock(ctx, u.stateRepo)
+	if err != nil {
+		return err
+	}
+	if !acquired {
+		return nil
+	}
+	defer releaseLock()
+
 	fmt.Println("=== Palisade process-manual (trade_log_manual) ===")
 
 	cfg, err := loadProcessManualConfig(configPath)

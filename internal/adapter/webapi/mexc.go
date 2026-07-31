@@ -232,10 +232,20 @@ func (m *MexcWebapi) GetOrderQuery(
 	symbol string,
 	orderId string,
 ) (*mexc.QueryOrderResult, error) {
-	params := map[string]string{
-		"symbol":  symbol,
-		"orderId": orderId, // ID ордера
-	}
+	return m.queryOrder(symbol, map[string]string{"orderId": orderId})
+}
+
+// GetOrderQueryByClientID ищет ордер по clientOrderId. Это нужно для
+// восстановления после таймаута, когда биржа могла создать ордер, но ответ
+// с exchange order id не дошёл до приложения.
+func (m *MexcWebapi) GetOrderQueryByClientID(
+	symbol string,
+	clientOrderID string,
+) (*mexc.QueryOrderResult, error) {
+	return m.queryOrder(symbol, map[string]string{"origClientOrderId": clientOrderID})
+}
+
+func (m *MexcWebapi) queryOrder(symbol string, params map[string]string) (*mexc.QueryOrderResult, error) {
 
 	// Используем recover для перехвата паники от SDK
 	var resp interface{}

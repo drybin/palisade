@@ -88,10 +88,59 @@ type MarketSnapshot struct {
 	PriceChangePercent float64
 }
 
+type PalisadeOrderIntent struct {
+	ID                 int
+	ClientOrderID      string
+	Symbol             string
+	Side               string
+	Price              float64
+	Quantity           float64
+	OpenBalance        float64
+	TargetPrice        float64
+	Status             string
+	ExchangeOrderID    string
+	TradeID            pgtype.Int4
+	ExecutedQuantity   float64
+	CumulativeQuoteQty float64
+	LastError          string
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
+}
+
 type PalisadeSignal struct {
-	Symbol string
-	SentAt time.Time
-	Score  float64
+	Symbol             string
+	SentAt             time.Time
+	Score              float64
+	EntryPrice         float64
+	TargetPrice        float64
+	MinExitPrice       float64
+	NetProfit          float64
+	Status             string
+	InvalidationReason string
+	ValidUntil         time.Time
+	UpdatedAt          time.Time
+}
+
+type PaperTrade struct {
+	ID             int
+	Symbol         string
+	SignalAt       time.Time
+	Status         string
+	EntryPrice     float64
+	TargetPrice    float64
+	MinExitPrice   float64
+	Quantity       float64
+	FilledQuantity float64
+	SoldQuantity   float64
+	BuyQuote       float64
+	SellQuote      float64
+	Fees           float64
+	Pnl            float64
+	OpenedAt       *time.Time
+	ClosedAt       *time.Time
+	ExitReason     string
+	LastPrice      float64
+	UpdatedAt      time.Time
 }
 
 type State struct {

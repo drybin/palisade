@@ -45,6 +45,9 @@ func Run(config *config.Config) error {
 		command.NewCheckTrendRetestCommand(cnt.Usecases.CheckTrendRetest),
 		command.NewCollectMarketDataCommand(cnt.Usecases.CollectMarketData),
 		command.NewScorePalisadeCandidatesCommand(cnt.Usecases.ScorePalisadeCandidates),
+		command.NewExecutePalisadeSignalsCommand(cnt.Usecases.ExecutePalisadeSignals),
+		command.NewReconcileOrdersCommand(cnt.Usecases.ReconcileOrders),
+		command.NewPaperTradeCommand(cnt.Usecases.PaperTrade),
 	}
 
 	return app.Run(os.Args)

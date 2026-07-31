@@ -55,6 +55,15 @@ func NewPalisadeProcessMultiUsecase(
 }
 
 func (u *PalisadeProcessMulti) Process(ctx context.Context) error {
+	releaseLock, acquired, err := acquireTradingLock(ctx, u.stateRepo)
+	if err != nil {
+		return err
+	}
+	if !acquired {
+		return nil
+	}
+	defer releaseLock()
+
 	fmt.Println("palisade process multi")
 
 	maxOrderCount := 5

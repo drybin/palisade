@@ -57,6 +57,15 @@ func NewPalisadeProcessUsecase(
 }
 
 func (u *PalisadeProcess) Process(ctx context.Context) error {
+	releaseLock, acquired, err := acquireTradingLock(ctx, u.stateRepo)
+	if err != nil {
+		return err
+	}
+	if !acquired {
+		return nil
+	}
+	defer releaseLock()
+
 	fmt.Println("palisade process")
 
 	accountInfo, err := u.repo.GetBalance(ctx)

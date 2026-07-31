@@ -40,6 +40,9 @@ type Usecases struct {
 	CheckTrendRetest          *usecase.CheckTrendRetest
 	CollectMarketData         *usecase.CollectMarketData
 	ScorePalisadeCandidates   *usecase.ScorePalisadeCandidates
+	ExecutePalisadeSignals    *usecase.ExecutePalisadeSignals
+	ReconcileOrders           *usecase.ReconcileOrders
+	PaperTrade                *usecase.PaperTradeRunner
 }
 
 func NewContainer(
@@ -111,6 +114,9 @@ func NewContainer(
 			CheckTrendRetest:          usecase.NewCheckTrendRetestUsecase(mexcApi, trendRepo, telegramApi),
 			CollectMarketData:         usecase.NewCollectMarketDataUsecase(mexcApi, stateRepo),
 			ScorePalisadeCandidates:   usecase.NewScorePalisadeCandidatesUsecase(mexcApi, stateRepo, telegramApi),
+			ExecutePalisadeSignals:    usecase.NewExecutePalisadeSignalsUsecase(mexcApi, stateRepo, telegramApi),
+			ReconcileOrders:           usecase.NewReconcileOrdersUsecase(mexcApi, stateRepo, telegramApi),
+			PaperTrade:                usecase.NewPaperTradeUsecase(mexcApi, stateRepo),
 		},
 		MexcSpot: mexcSpot,
 		Clean: func() {

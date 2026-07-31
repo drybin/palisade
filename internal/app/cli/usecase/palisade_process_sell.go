@@ -205,6 +205,15 @@ func (u *PalisadeProcessSell) placeLimitSell(ctx context.Context, dbOrder repo.T
 }
 
 func (u *PalisadeProcessSell) Process(ctx context.Context) error {
+	releaseLock, acquired, err := acquireTradingLock(ctx, u.stateRepo)
+	if err != nil {
+		return err
+	}
+	if !acquired {
+		return nil
+	}
+	defer releaseLock()
+
 	if u.useManualLog {
 		fmt.Println("=== Palisade Process Sell (manual / trade_log_manual) ===")
 	} else {
@@ -212,7 +221,6 @@ func (u *PalisadeProcessSell) Process(ctx context.Context) error {
 	}
 
 	var dbOrders []repo.TradeLog
-	var err error
 	if u.useManualLog {
 		var dbOrder *repo.TradeLog
 		if u.sellConfigPath != "" {

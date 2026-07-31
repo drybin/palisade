@@ -13,10 +13,30 @@ import (
 	"github.com/drybin/palisade/pkg/wrap"
 	palisade_database "github.com/drybin/palisade/sqlc/gen"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 type StateRepository struct {
 	Postgree *pgx.Conn
+}
+
+func (u StateRepository) TryAcquireTradingLock(ctx context.Context, key string) (bool, error) {
+	var acquired bool
+	if err := u.Postgree.QueryRow(ctx, "SELECT pg_try_advisory_lock(hashtext($1)::bigint)", key).Scan(&acquired); err != nil {
+		return false, wrap.Errorf("acquire trading lock %q: %w", key, err)
+	}
+	return acquired, nil
+}
+
+func (u StateRepository) ReleaseTradingLock(ctx context.Context, key string) error {
+	var released bool
+	if err := u.Postgree.QueryRow(ctx, "SELECT pg_advisory_unlock(hashtext($1)::bigint)", key).Scan(&released); err != nil {
+		return wrap.Errorf("release trading lock %q: %w", key, err)
+	}
+	if !released {
+		return wrap.Errorf("trading lock %q was not held by this connection", key)
+	}
+	return nil
 }
 
 func NewStateRepository(pg *pgx.Conn) StateRepository {
@@ -346,6 +366,18 @@ func (u StateRepository) UpdateDealDateTradeLog(ctx context.Context, id int, dea
 	return nil
 }
 
+func (u StateRepository) UpdateTradeLevels(ctx context.Context, id int, upLevel, downLevel float64) error {
+	db := palisade_database.New(u.Postgree)
+	if err := db.UpdateTradeLevels(ctx, palisade_database.UpdateTradeLevelsParams{
+		Uplevel:   upLevel,
+		Downlevel: downLevel,
+		ID:        id,
+	}); err != nil {
+		return wrap.Errorf("failed to update trade levels for id %d: %w", id, err)
+	}
+	return nil
+}
+
 func (u StateRepository) UpdateCancelDateTradeLog(ctx context.Context, id int, cancelDate time.Time) error {
 	db := palisade_database.New(u.Postgree)
 
@@ -401,6 +433,18 @@ func (u StateRepository) UpdateAmountTradeLog(ctx context.Context, id int, amoun
 		return wrap.Errorf("failed to update amount for trade log id %d: %w", id, err)
 	}
 
+	return nil
+}
+
+func (u StateRepository) UpdateTradeFill(ctx context.Context, id int, buyPrice, amount float64) error {
+	db := palisade_database.New(u.Postgree)
+	if err := db.UpdateTradeFill(ctx, palisade_database.UpdateTradeFillParams{
+		BuyPrice: buyPrice,
+		Amount:   amount,
+		ID:       id,
+	}); err != nil {
+		return wrap.Errorf("failed to update trade fill for id %d: %w", id, err)
+	}
 	return nil
 }
 
@@ -690,6 +734,279 @@ func (u StateRepository) SavePalisadeSignal(ctx context.Context, symbol string, 
 		SentAt: sentAt,
 		Score:  score,
 	})
+}
+
+func (u StateRepository) SavePalisadeSignalState(ctx context.Context, signal repo.PalisadeSignalState) error {
+	db := palisade_database.New(u.Postgree)
+	return db.SavePalisadeSignalState(ctx, palisade_database.SavePalisadeSignalStateParams{
+		Symbol:             signal.Symbol,
+		EntryPrice:         signal.EntryPrice,
+		TargetPrice:        signal.TargetPrice,
+		MinExitPrice:       signal.MinExitPrice,
+		NetProfit:          signal.NetProfit,
+		Score:              float64(signal.Score),
+		Status:             signal.Status,
+		InvalidationReason: signal.InvalidationReason,
+		ValidUntil:         signal.ValidUntil,
+		UpdatedAt:          signal.UpdatedAt,
+	})
+}
+
+func (u StateRepository) ListActivePalisadeSignals(ctx context.Context) ([]repo.PalisadeSignalState, error) {
+	db := palisade_database.New(u.Postgree)
+	rows, err := db.ListActivePalisadeSignals(ctx)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return []repo.PalisadeSignalState{}, nil
+		}
+		return nil, wrap.Errorf("list active palisade signals: %w", err)
+	}
+	result := make([]repo.PalisadeSignalState, 0, len(rows))
+	for _, row := range rows {
+		result = append(result, repo.PalisadeSignalState{
+			Symbol:             row.Symbol,
+			EntryPrice:         row.EntryPrice,
+			TargetPrice:        row.TargetPrice,
+			MinExitPrice:       row.MinExitPrice,
+			NetProfit:          row.NetProfit,
+			Score:              int(row.Score),
+			Status:             row.Status,
+			InvalidationReason: row.InvalidationReason,
+			ValidUntil:         row.ValidUntil,
+			UpdatedAt:          row.UpdatedAt,
+		})
+	}
+	return result, nil
+}
+
+func (u StateRepository) CreateOrderIntent(ctx context.Context, intent repo.OrderIntent) (*repo.OrderIntent, error) {
+	db := palisade_database.New(u.Postgree)
+	tradeID := pgtype.Int4{}
+	if intent.TradeID > 0 {
+		tradeID = pgtype.Int4{Int32: int32(intent.TradeID), Valid: true}
+	}
+	created, err := db.CreateOrderIntent(ctx, palisade_database.CreateOrderIntentParams{
+		ClientOrderID:      intent.ClientOrderID,
+		Symbol:             intent.Symbol,
+		Side:               intent.Side,
+		Price:              intent.Price,
+		Quantity:           intent.Quantity,
+		OpenBalance:        intent.OpenBalance,
+		TargetPrice:        intent.TargetPrice,
+		Status:             intent.Status,
+		ExchangeOrderID:    intent.ExchangeOrderID,
+		TradeID:            tradeID,
+		ExecutedQuantity:   intent.ExecutedQuantity,
+		CumulativeQuoteQty: intent.CumulativeQuoteQty,
+		LastError:          intent.LastError,
+		CreatedAt:          intent.CreatedAt,
+		UpdatedAt:          intent.UpdatedAt,
+	})
+	if err != nil {
+		return nil, wrap.Errorf("create order intent %s: %w", intent.ClientOrderID, err)
+	}
+	return mapOrderIntentToDomain(created), nil
+}
+
+func (u StateRepository) UpdateOrderIntent(ctx context.Context, id int, status, exchangeOrderID string, executed, quote float64, lastError string) error {
+	db := palisade_database.New(u.Postgree)
+	if err := db.UpdateOrderIntent(ctx, palisade_database.UpdateOrderIntentParams{
+		ID:                 id,
+		Status:             status,
+		ExchangeOrderID:    exchangeOrderID,
+		ExecutedQuantity:   executed,
+		CumulativeQuoteQty: quote,
+		LastError:          lastError,
+	}); err != nil {
+		return wrap.Errorf("update order intent %d: %w", id, err)
+	}
+	return nil
+}
+
+func (u StateRepository) UpdateOrderIntentTradeID(ctx context.Context, id, tradeID int) error {
+	db := palisade_database.New(u.Postgree)
+	value := pgtype.Int4{Int32: int32(tradeID), Valid: tradeID > 0}
+	if err := db.UpdateOrderIntentTradeID(ctx, palisade_database.UpdateOrderIntentTradeIDParams{ID: id, TradeID: value}); err != nil {
+		return wrap.Errorf("update order intent %d trade id: %w", id, err)
+	}
+	return nil
+}
+
+func (u StateRepository) ListRecoverableOrderIntents(ctx context.Context) ([]repo.OrderIntent, error) {
+	db := palisade_database.New(u.Postgree)
+	rows, err := db.ListRecoverableOrderIntents(ctx)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return []repo.OrderIntent{}, nil
+		}
+		return nil, wrap.Errorf("list recoverable order intents: %w", err)
+	}
+	result := make([]repo.OrderIntent, 0, len(rows))
+	for _, row := range rows {
+		result = append(result, *mapOrderIntentToDomain(row))
+	}
+	return result, nil
+}
+
+func (u StateRepository) ListOrderIntentsByTradeID(ctx context.Context, tradeID int) ([]repo.OrderIntent, error) {
+	db := palisade_database.New(u.Postgree)
+	rows, err := db.ListOrderIntentsByTradeID(ctx, pgtype.Int4{Int32: int32(tradeID), Valid: tradeID > 0})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return []repo.OrderIntent{}, nil
+		}
+		return nil, wrap.Errorf("list order intents for trade %d: %w", tradeID, err)
+	}
+	result := make([]repo.OrderIntent, 0, len(rows))
+	for _, row := range rows {
+		result = append(result, *mapOrderIntentToDomain(row))
+	}
+	return result, nil
+}
+
+func mapOrderIntentToDomain(row palisade_database.PalisadeOrderIntent) *repo.OrderIntent {
+	tradeID := 0
+	if row.TradeID.Valid {
+		tradeID = int(row.TradeID.Int32)
+	}
+	return &repo.OrderIntent{
+		ID:                 row.ID,
+		ClientOrderID:      row.ClientOrderID,
+		Symbol:             row.Symbol,
+		Side:               row.Side,
+		Price:              row.Price,
+		Quantity:           row.Quantity,
+		OpenBalance:        row.OpenBalance,
+		TargetPrice:        row.TargetPrice,
+		Status:             row.Status,
+		ExchangeOrderID:    row.ExchangeOrderID,
+		TradeID:            tradeID,
+		ExecutedQuantity:   row.ExecutedQuantity,
+		CumulativeQuoteQty: row.CumulativeQuoteQty,
+		LastError:          row.LastError,
+		CreatedAt:          row.CreatedAt,
+		UpdatedAt:          row.UpdatedAt,
+	}
+}
+
+func (u StateRepository) GetOpenPaperTradeBySymbol(ctx context.Context, symbol string) (*repo.PaperTrade, error) {
+	db := palisade_database.New(u.Postgree)
+	row, err := db.GetOpenPaperTradeBySymbol(ctx, symbol)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, wrap.Errorf("get open paper trade for %s: %w", symbol, err)
+	}
+	return mapPaperTradeToDomain(row), nil
+}
+
+func (u StateRepository) ListOpenPaperTrades(ctx context.Context) ([]repo.PaperTrade, error) {
+	db := palisade_database.New(u.Postgree)
+	rows, err := db.ListOpenPaperTrades(ctx)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return []repo.PaperTrade{}, nil
+		}
+		return nil, wrap.Errorf("list open paper trades: %w", err)
+	}
+	result := make([]repo.PaperTrade, 0, len(rows))
+	for _, row := range rows {
+		result = append(result, *mapPaperTradeToDomain(row))
+	}
+	return result, nil
+}
+
+func (u StateRepository) CreatePaperTrade(ctx context.Context, trade repo.PaperTrade) (*repo.PaperTrade, error) {
+	db := palisade_database.New(u.Postgree)
+	row, err := db.CreatePaperTrade(ctx, palisade_database.CreatePaperTradeParams{
+		Symbol:         trade.Symbol,
+		SignalAt:       trade.SignalAt,
+		Status:         trade.Status,
+		EntryPrice:     trade.EntryPrice,
+		TargetPrice:    trade.TargetPrice,
+		MinExitPrice:   trade.MinExitPrice,
+		Quantity:       trade.Quantity,
+		FilledQuantity: trade.FilledQuantity,
+		SoldQuantity:   trade.SoldQuantity,
+		BuyQuote:       trade.BuyQuote,
+		SellQuote:      trade.SellQuote,
+		Fees:           trade.Fees,
+		Pnl:            trade.PnL,
+		OpenedAt:       trade.OpenedAt,
+		ClosedAt:       trade.ClosedAt,
+		ExitReason:     trade.ExitReason,
+		LastPrice:      trade.LastPrice,
+		UpdatedAt:      trade.UpdatedAt,
+	})
+	if err != nil {
+		return nil, wrap.Errorf("create paper trade %s: %w", trade.Symbol, err)
+	}
+	return mapPaperTradeToDomain(row), nil
+}
+
+func (u StateRepository) UpdatePaperTrade(ctx context.Context, trade repo.PaperTrade) error {
+	db := palisade_database.New(u.Postgree)
+	if err := db.UpdatePaperTrade(ctx, palisade_database.UpdatePaperTradeParams{
+		ID:             trade.ID,
+		Status:         trade.Status,
+		TargetPrice:    trade.TargetPrice,
+		FilledQuantity: trade.FilledQuantity,
+		SoldQuantity:   trade.SoldQuantity,
+		BuyQuote:       trade.BuyQuote,
+		SellQuote:      trade.SellQuote,
+		Fees:           trade.Fees,
+		Pnl:            trade.PnL,
+		OpenedAt:       trade.OpenedAt,
+		ClosedAt:       trade.ClosedAt,
+		ExitReason:     trade.ExitReason,
+		LastPrice:      trade.LastPrice,
+		UpdatedAt:      trade.UpdatedAt,
+	}); err != nil {
+		return wrap.Errorf("update paper trade %d: %w", trade.ID, err)
+	}
+	return nil
+}
+
+func (u StateRepository) GetPaperTradeStats(ctx context.Context) (repo.PaperTradeStats, error) {
+	db := palisade_database.New(u.Postgree)
+	row, err := db.GetPaperTradeStats(ctx)
+	if err != nil {
+		return repo.PaperTradeStats{}, wrap.Errorf("get paper trade stats: %w", err)
+	}
+	return repo.PaperTradeStats{
+		Total:      row.Total,
+		Closed:     row.Closed,
+		Open:       row.Open,
+		TotalPnL:   row.TotalPnl,
+		AveragePnL: row.AveragePnl,
+		Wins:       row.Wins,
+		Losses:     row.Losses,
+	}, nil
+}
+
+func mapPaperTradeToDomain(row palisade_database.PaperTrade) *repo.PaperTrade {
+	return &repo.PaperTrade{
+		ID:             row.ID,
+		Symbol:         row.Symbol,
+		SignalAt:       row.SignalAt,
+		Status:         row.Status,
+		EntryPrice:     row.EntryPrice,
+		TargetPrice:    row.TargetPrice,
+		MinExitPrice:   row.MinExitPrice,
+		Quantity:       row.Quantity,
+		FilledQuantity: row.FilledQuantity,
+		SoldQuantity:   row.SoldQuantity,
+		BuyQuote:       row.BuyQuote,
+		SellQuote:      row.SellQuote,
+		Fees:           row.Fees,
+		PnL:            row.Pnl,
+		OpenedAt:       row.OpenedAt,
+		ClosedAt:       row.ClosedAt,
+		ExitReason:     row.ExitReason,
+		LastPrice:      row.LastPrice,
+		UpdatedAt:      row.UpdatedAt,
+	}
 }
 
 func mapCoinToDomainModel(c palisade_database.Coin) (*mexc.SymbolDetail, error) {

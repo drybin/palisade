@@ -40,9 +40,10 @@ func NewScorePalisadeCandidatesUsecase(api *webapi.MexcWebapi, stateRepo repo.IS
 }
 
 type palisadeSignal struct {
-	symbol, baseAsset                                       string
-	current, support, resistance, netProfit, spread, volume float64
-	touchesSupport, touchesResistance, score                int
+	symbol, baseAsset                          string
+	current, support, resistance, minExitPrice float64
+	netProfit, spread, volume                  float64
+	touchesSupport, touchesResistance, score   int
 }
 
 func (u *ScorePalisadeCandidates) Process(ctx context.Context, debug bool) error {
@@ -65,6 +66,7 @@ func (u *ScorePalisadeCandidates) Process(ctx context.Context, debug bool) error
 	}
 
 	candidates := make([]palisadeSignal, 0, maxSignalCandidates)
+	klinesChecked := 0
 	for _, snapshot := range snapshots {
 		if snapshot.CollectedAt.IsZero() || time.Since(snapshot.CollectedAt) > 5*time.Minute {
 			if debug {
@@ -83,6 +85,7 @@ func (u *ScorePalisadeCandidates) Process(ctx context.Context, debug bool) error
 		if spread > 0.003 {
 			continue
 		}
+		klinesChecked++
 		klines, err := u.api.GetKlinesPublic(ctx, snapshot.Symbol, enum.MINUTES_15, 100, nil)
 		if err != nil {
 			if debug {
@@ -100,6 +103,12 @@ func (u *ScorePalisadeCandidates) Process(ctx context.Context, debug bool) error
 	}
 
 	sort.Slice(candidates, func(i, j int) bool { return candidates[i].score > candidates[j].score })
+	fmt.Printf("Snapshots загружено: %d\nСвечи запрошены для: %d пар\nОтобрано кандидатов: %d\n", len(snapshots), klinesChecked, len(candidates))
+	for i, candidate := range candidates {
+		fmt.Printf("%2d. %-16s цена=%-12s вход=%-12s цель=%-12s net=%.2f%% объём=%.0f спред=%.3f%% касания=S%d/R%d score=%d\n",
+			i+1, candidate.symbol, formatPrice(candidate.current), formatPrice(candidate.support), formatPrice(candidate.resistance),
+			candidate.netProfit*100, candidate.volume, candidate.spread*100, candidate.touchesSupport, candidate.touchesResistance, candidate.score)
+	}
 	sent := 0
 	now := time.Now().UTC()
 	for _, candidate := range candidates {
@@ -107,7 +116,21 @@ func (u *ScorePalisadeCandidates) Process(ctx context.Context, debug bool) error
 		if err != nil {
 			return err
 		}
+		state := repo.PalisadeSignalState{
+			Symbol:       candidate.symbol,
+			EntryPrice:   candidate.support,
+			TargetPrice:  candidate.resistance,
+			MinExitPrice: candidate.minExitPrice,
+			NetProfit:    candidate.netProfit,
+			Score:        candidate.score,
+			Status:       "ACTIVE",
+			ValidUntil:   now.Add(30 * time.Minute),
+			UpdatedAt:    now,
+		}
 		if lastSent != nil && now.Sub(*lastSent) < signalCooldown {
+			if err := u.stateRepo.SavePalisadeSignalState(ctx, state); err != nil {
+				return wrap.Errorf("update signal state %s: %w", candidate.symbol, err)
+			}
 			continue
 		}
 		message := formatPalisadeSignal(candidate, now)
@@ -117,13 +140,16 @@ func (u *ScorePalisadeCandidates) Process(ctx context.Context, debug bool) error
 		if err := u.stateRepo.SavePalisadeSignal(ctx, candidate.symbol, now, float64(candidate.score)); err != nil {
 			return wrap.Errorf("save signal %s: %w", candidate.symbol, err)
 		}
+		if err := u.stateRepo.SavePalisadeSignalState(ctx, state); err != nil {
+			return wrap.Errorf("save signal state %s: %w", candidate.symbol, err)
+		}
 		sent++
 		if sent >= maxSignalsPerRun {
 			break
 		}
 	}
 
-	fmt.Printf("Проверено кандидатов: %d, отправлено сигналов: %d\n", len(candidates), sent)
+	fmt.Printf("Отправлено сигналов: %d\n", sent)
 	return nil
 }
 
@@ -190,17 +216,30 @@ func buildPalisadeSignal(snapshot repo.MarketSnapshot, symbol mexc.SymbolDetail,
 	takerFee := parseDecimal(symbol.TakerCommission)
 	fee := math.Max(makerFee, takerFee)
 	entry := support
-	target := resistance * 0.999
-	netProfit := target/entry - 1 - 2*fee - 0.001 - (snapshot.AskPrice-snapshot.BidPrice)/snapshot.BidPrice
+	spread := (snapshot.AskPrice - snapshot.BidPrice) / snapshot.BidPrice
+	target, minExitPrice, ok := calculateDynamicTarget(entry, resistance, fee, spread)
+	if !ok {
+		return palisadeSignal{}, false
+	}
+	netProfit := target/entry - 1 - 2*fee - 0.001 - spread
 	if netProfit < minSignalNetProfit {
 		return palisadeSignal{}, false
 	}
 	score := int(netProfit*10000) + supportTouches*10 + resistanceTouches*10 - int(math.Abs((last-first)/first)*1000)
 	return palisadeSignal{
 		symbol: symbol.Symbol, baseAsset: symbol.BaseAsset, current: current, support: entry,
-		resistance: target, netProfit: netProfit, spread: (snapshot.AskPrice - snapshot.BidPrice) / snapshot.BidPrice,
+		resistance: target, minExitPrice: minExitPrice, netProfit: netProfit, spread: spread,
 		volume: snapshot.QuoteVolume24h, touchesSupport: supportTouches, touchesResistance: resistanceTouches, score: score,
 	}, true
+}
+
+func calculateDynamicTarget(entry, resistance, fee, spread float64) (target, minExitPrice float64, ok bool) {
+	if entry <= 0 || resistance <= entry || fee < 0 || spread < 0 {
+		return 0, 0, false
+	}
+	target = resistance * 0.999
+	minExitPrice = entry * (1 + 2*fee + 0.001 + spread + minSignalNetProfit)
+	return target, minExitPrice, target >= minExitPrice
 }
 
 func percentileValue(values []float64, percentile float64) float64 {
