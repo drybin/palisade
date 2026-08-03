@@ -169,6 +169,7 @@ CREATE INDEX palisade_order_intent_recovery_idx
 
 CREATE TABLE paper_trade (
     id              SERIAL PRIMARY KEY,
+    strategy_version INT NOT NULL DEFAULT 1,
     symbol          TEXT NOT NULL,
     signal_at       TIMESTAMPTZ NOT NULL,
     status          TEXT NOT NULL,
@@ -190,6 +191,8 @@ CREATE TABLE paper_trade (
 );
 
 CREATE INDEX paper_trade_symbol_status_idx ON paper_trade (symbol, status);
+CREATE INDEX paper_trade_strategy_status_idx ON paper_trade (strategy_version, status);
+CREATE INDEX paper_trade_signal_idx ON paper_trade (strategy_version, symbol, signal_at);
 
 CREATE TABLE trend_retest_state (
     symbol                  TEXT NOT NULL,

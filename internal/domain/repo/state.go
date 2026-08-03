@@ -29,6 +29,7 @@ type MarketSnapshot struct {
 
 type PalisadeSignalState struct {
 	Symbol             string
+	SentAt             time.Time
 	EntryPrice         float64
 	TargetPrice        float64
 	MinExitPrice       float64
@@ -60,32 +61,35 @@ type OrderIntent struct {
 }
 
 type PaperTrade struct {
-	ID             int
-	Symbol         string
-	SignalAt       time.Time
-	Status         string
-	EntryPrice     float64
-	TargetPrice    float64
-	MinExitPrice   float64
-	Quantity       float64
-	FilledQuantity float64
-	SoldQuantity   float64
-	BuyQuote       float64
-	SellQuote      float64
-	Fees           float64
-	PnL            float64
-	OpenedAt       *time.Time
-	ClosedAt       *time.Time
-	ExitReason     string
-	LastPrice      float64
-	UpdatedAt      time.Time
+	ID              int
+	StrategyVersion int
+	Symbol          string
+	SignalAt        time.Time
+	Status          string
+	EntryPrice      float64
+	TargetPrice     float64
+	MinExitPrice    float64
+	Quantity        float64
+	FilledQuantity  float64
+	SoldQuantity    float64
+	BuyQuote        float64
+	SellQuote       float64
+	Fees            float64
+	PnL             float64
+	OpenedAt        *time.Time
+	ClosedAt        *time.Time
+	ExitReason      string
+	LastPrice       float64
+	UpdatedAt       time.Time
 }
 
 type PaperTradeStats struct {
 	Total      int
 	Closed     int
+	Canceled   int
 	Open       int
 	TotalPnL   float64
+	OpenPnL    float64
 	AveragePnL float64
 	Wins       int
 	Losses     int
@@ -134,11 +138,12 @@ type IStateRepository interface {
 	UpdateOrderIntentTradeID(context.Context, int, int) error
 	ListRecoverableOrderIntents(context.Context) ([]OrderIntent, error)
 	ListOrderIntentsByTradeID(context.Context, int) ([]OrderIntent, error)
-	GetOpenPaperTradeBySymbol(context.Context, string) (*PaperTrade, error)
-	ListOpenPaperTrades(context.Context) ([]PaperTrade, error)
+	GetOpenPaperTradeBySymbol(context.Context, string, int) (*PaperTrade, error)
+	GetPaperTradeBySignal(context.Context, string, time.Time, int) (*PaperTrade, error)
+	ListOpenPaperTrades(context.Context, int) ([]PaperTrade, error)
 	CreatePaperTrade(context.Context, PaperTrade) (*PaperTrade, error)
 	UpdatePaperTrade(context.Context, PaperTrade) error
-	GetPaperTradeStats(context.Context) (PaperTradeStats, error)
+	GetPaperTradeStats(context.Context, int) (PaperTradeStats, error)
 }
 
 type SaveTradeLogParams struct {

@@ -7,6 +7,7 @@ import (
 	"mexc-sdk/mexcsdk"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/drybin/palisade/internal/app/cli/config"
 	"github.com/drybin/palisade/internal/domain/enum"
@@ -35,6 +36,7 @@ func NewMexcWebapi(
 	publicClient := resty.New()
 	publicClient.SetBaseURL(config.BaseUrl)
 	publicClient.SetHeader("Content-Type", "application/json")
+	publicClient.SetTimeout(20 * time.Second)
 	// Не устанавливаем X-MEXC-APIKEY для публичных запросов
 
 	return &MexcWebapi{
@@ -74,20 +76,21 @@ func (m *MexcWebapi) GetAllTickerPrices(ctx context.Context) (*mexc.TickersWithP
 
 // GetAllBookTickers возвращает лучший bid/ask по всем символам (GET /api/v3/ticker/bookTicker).
 func (m *MexcWebapi) GetAllBookTickers(ctx context.Context) (*mexc.BookTickers, error) {
-	_ = ctx
-	res := m.spot.BookTicker(nil)
-	bytes, err := json.Marshal(res)
+	res, err := m.publicClient.R().SetContext(ctx).Get("/api/v3/ticker/bookTicker")
 	if err != nil {
-		return nil, wrap.Errorf("failed to marshal book ticker response: %w", err)
+		return nil, wrap.Errorf("failed to get book tickers: %w", err)
+	}
+	if res.IsError() {
+		return nil, wrap.Errorf("failed to get book tickers, status: %d, body: %s", res.StatusCode(), string(res.Body()))
 	}
 
 	var arr mexc.BookTickers
-	if err := json.Unmarshal(bytes, &arr); err == nil && len(arr) > 0 {
+	if err := json.Unmarshal(res.Body(), &arr); err == nil && len(arr) > 0 {
 		return &arr, nil
 	}
 
 	var single mexc.BookTicker
-	if err := json.Unmarshal(bytes, &single); err != nil {
+	if err := json.Unmarshal(res.Body(), &single); err != nil {
 		return nil, wrap.Errorf("failed to unmarshal book ticker info: %w", err)
 	}
 	if single.Symbol == "" {
@@ -98,7 +101,7 @@ func (m *MexcWebapi) GetAllBookTickers(ctx context.Context) (*mexc.BookTickers, 
 }
 
 func (m *MexcWebapi) GetAll24hTickers(ctx context.Context) (*mexc.Tickers24h, error) {
-	res, err := m.publicClient.R().Get("/api/v3/ticker/24hr")
+	res, err := m.publicClient.R().SetContext(ctx).Get("/api/v3/ticker/24hr")
 	if err != nil {
 		return nil, wrap.Errorf("failed to get 24h tickers: %w", err)
 	}
@@ -131,15 +134,16 @@ func (m *MexcWebapi) GetSymbolInfo(ctx context.Context, symbol string) (*mexc.Sy
 
 // GetExchangeInfoAll возвращает exchangeInfo по всем символам (без фильтра symbol).
 func (m *MexcWebapi) GetExchangeInfoAll(ctx context.Context) (*mexc.SymbolInfo, error) {
-	_ = ctx
-	res := m.spot.ExchangeInfo(map[string]string{})
-	bytes, err := json.Marshal(res)
+	res, err := m.publicClient.R().SetContext(ctx).Get("/api/v3/exchangeInfo")
 	if err != nil {
-		return nil, wrap.Errorf("failed to marshal exchange info: %w", err)
+		return nil, wrap.Errorf("failed to get exchange info: %w", err)
+	}
+	if res.IsError() {
+		return nil, wrap.Errorf("failed to get exchange info, status: %d, body: %s", res.StatusCode(), string(res.Body()))
 	}
 
 	result := mexc.SymbolInfo{}
-	err = json.Unmarshal(bytes, &result)
+	err = json.Unmarshal(res.Body(), &result)
 	if err != nil {
 		return nil, wrap.Errorf("failed to unmarshal exchange info: %w", err)
 	}

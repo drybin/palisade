@@ -14,7 +14,10 @@ import (
 	"github.com/drybin/palisade/pkg/wrap"
 )
 
-const paperLockKey = "palisade:paper-trading"
+const (
+	paperLockKey         = "palisade:paper-trading"
+	paperStrategyVersion = 2
+)
 
 type IPaperTrade interface {
 	Process(context.Context, bool) error
@@ -62,7 +65,7 @@ func (u *PaperTradeRunner) Process(ctx context.Context, debug bool) error {
 		}
 	}
 
-	openTrades, err := u.stateRepo.ListOpenPaperTrades(ctx)
+	openTrades, err := u.stateRepo.ListOpenPaperTrades(ctx, paperStrategyVersion)
 	if err != nil {
 		return err
 	}
@@ -77,13 +80,27 @@ func (u *PaperTradeRunner) Process(ctx context.Context, debug bool) error {
 			return err
 		}
 		if debug {
-			fmt.Printf("paper %s: status=%s filled=%.8f sold=%.8f pnl=%.8f\n", trade.Symbol, trade.Status, trade.FilledQuantity, trade.SoldQuantity, trade.PnL)
+			fmt.Printf("paper %s: status=%s filled=%.8f sold=%.8f mark_pnl=%.8f\n", trade.Symbol, trade.Status, trade.FilledQuantity, trade.SoldQuantity, trade.PnL)
 		}
 	}
 
 	created := 0
 	for _, signal := range signals {
 		if _, exists := openBySymbol[signal.Symbol]; exists {
+			continue
+		}
+		signalAt := paperSignalAt(signal)
+		if signalAt.IsZero() {
+			if debug {
+				fmt.Printf("paper %s: у сигнала нет sent_at\n", signal.Symbol)
+			}
+			continue
+		}
+		existing, err := u.stateRepo.GetPaperTradeBySignal(ctx, signal.Symbol, signalAt, paperStrategyVersion)
+		if err != nil {
+			return err
+		}
+		if existing != nil {
 			continue
 		}
 		book, ok := bookBySymbol[signal.Symbol]
@@ -111,12 +128,13 @@ func (u *PaperTradeRunner) Process(ctx context.Context, debug bool) error {
 		}
 	}
 
-	stats, err := u.stateRepo.GetPaperTradeStats(ctx)
+	stats, err := u.stateRepo.GetPaperTradeStats(ctx, paperStrategyVersion)
 	if err != nil {
 		return err
 	}
-	fmt.Printf("Paper trading: открытых=%d, новых=%d, всего=%d, закрыто=%d, P/L=%.8f USDT, win=%d, loss=%d\n",
-		stats.Open, created, stats.Total, stats.Closed, stats.TotalPnL, stats.Wins, stats.Losses)
+	fmt.Printf("Paper trading v%d: открытых=%d, новых=%d, закрыто=%d, отменено=%d, всего=%d, P/L закрытых=%.8f USDT, P/L открытых=%.8f USDT, win=%d, loss=%d\n",
+		paperStrategyVersion, stats.Open, created, stats.Closed, stats.Canceled, stats.Total,
+		stats.TotalPnL, stats.OpenPnL, stats.Wins, stats.Losses)
 	return nil
 }
 
@@ -135,15 +153,16 @@ func buildPaperTrade(signal repo.PalisadeSignalState, book mexc.BookTicker, symb
 		return repo.PaperTrade{}, false, nil
 	}
 	return repo.PaperTrade{
-		Symbol:       signal.Symbol,
-		SignalAt:     signal.UpdatedAt,
-		Status:       "BUY_PENDING",
-		EntryPrice:   entry,
-		TargetPrice:  roundPriceDown(signal.TargetPrice, signalPriceStep(&symbol)),
-		MinExitPrice: roundPriceDown(signal.MinExitPrice, signalPriceStep(&symbol)),
-		Quantity:     quantity,
-		LastPrice:    (bid + ask) / 2,
-		UpdatedAt:    now,
+		StrategyVersion: paperStrategyVersion,
+		Symbol:          signal.Symbol,
+		SignalAt:        paperSignalAt(signal),
+		Status:          "BUY_PENDING",
+		EntryPrice:      entry,
+		TargetPrice:     roundPriceDown(signal.TargetPrice, signalPriceStep(&symbol)),
+		MinExitPrice:    roundPriceDown(signal.MinExitPrice, signalPriceStep(&symbol)),
+		Quantity:        quantity,
+		LastPrice:       (bid + ask) / 2,
+		UpdatedAt:       now,
 	}, true, nil
 }
 
@@ -161,10 +180,8 @@ func (u *PaperTradeRunner) processPaperTrade(ctx context.Context, trade *repo.Pa
 	fee := math.Max(parseDecimal(symbol.MakerCommission), parseDecimal(symbol.TakerCommission))
 
 	if signal.Symbol == trade.Symbol && signal.TargetPrice >= signal.MinExitPrice {
-		if trade.Status == "BUY_PENDING" || signal.TargetPrice > trade.TargetPrice {
-			trade.TargetPrice = roundPriceDown(signal.TargetPrice, signalPriceStep(&symbol))
-			trade.MinExitPrice = roundPriceDown(signal.MinExitPrice, signalPriceStep(&symbol))
-		}
+		trade.TargetPrice = roundPriceDown(signal.TargetPrice, signalPriceStep(&symbol))
+		trade.MinExitPrice = roundPriceDown(signal.MinExitPrice, signalPriceStep(&symbol))
 	}
 
 	if trade.Status == "BUY_PENDING" {
@@ -172,7 +189,7 @@ func (u *PaperTradeRunner) processPaperTrade(ctx context.Context, trade *repo.Pa
 			if trade.FilledQuantity == 0 {
 				trade.Status = "CANCELED"
 				trade.ExitReason = "BUY_NOT_FILLED"
-				return u.stateRepo.UpdatePaperTrade(ctx, *trade)
+				return u.persistPaperTrade(ctx, trade, now, bid, fee)
 			}
 			trade.Status = "POSITION_OPEN"
 		}
@@ -197,7 +214,7 @@ func (u *PaperTradeRunner) processPaperTrade(ctx context.Context, trade *repo.Pa
 			trade.ExitReason = "NO_REMAINING_ASSET"
 			closed := now
 			trade.ClosedAt = &closed
-			return u.stateRepo.UpdatePaperTrade(ctx, *trade)
+			return u.persistPaperTrade(ctx, trade, now, bid, fee)
 		}
 		buyPrice := trade.BuyQuote / trade.FilledQuantity
 		reason := emergencyReason(now, paperOpenedAt(*trade), bid, trade.EntryPrice, buyPrice)
@@ -222,15 +239,38 @@ func (u *PaperTradeRunner) processPaperTrade(ctx context.Context, trade *repo.Pa
 		}
 		if trade.SoldQuantity >= trade.FilledQuantity-1e-12 {
 			trade.SoldQuantity = trade.FilledQuantity
-			trade.PnL = trade.SellQuote - trade.BuyQuote - trade.Fees
 			trade.Status = "CLOSED"
 			closed := now
 			trade.ClosedAt = &closed
 		}
 	}
-	trade.PnL = trade.SellQuote - trade.BuyQuote - trade.Fees
+	return u.persistPaperTrade(ctx, trade, now, bid, fee)
+}
+
+func (u *PaperTradeRunner) persistPaperTrade(
+	ctx context.Context,
+	trade *repo.PaperTrade,
+	now time.Time,
+	bid float64,
+	fee float64,
+) error {
+	markPaperPnL(trade, bid, fee)
 	trade.UpdatedAt = now
 	return u.stateRepo.UpdatePaperTrade(ctx, *trade)
+}
+
+func markPaperPnL(trade *repo.PaperTrade, bid, fee float64) {
+	remaining := math.Max(0, trade.FilledQuantity-trade.SoldQuantity)
+	markValue := remaining * math.Max(0, bid)
+	estimatedExitFee := markValue * math.Max(0, fee)
+	trade.PnL = trade.SellQuote + markValue - trade.BuyQuote - trade.Fees - estimatedExitFee
+}
+
+func paperSignalAt(signal repo.PalisadeSignalState) time.Time {
+	if !signal.SentAt.IsZero() {
+		return signal.SentAt
+	}
+	return signal.UpdatedAt
 }
 
 func signalFor(signals []repo.PalisadeSignalState, symbol string) repo.PalisadeSignalState {
@@ -247,7 +287,7 @@ func paperFillQuantity(remaining, topLevelQuantity float64) float64 {
 		return 0
 	}
 	if topLevelQuantity <= 0 {
-		return remaining
+		return 0
 	}
 	return math.Min(remaining, topLevelQuantity)
 }

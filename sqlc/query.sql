@@ -337,7 +337,7 @@ SET entry_price = $2,
 WHERE symbol = $1;
 
 -- name: ListActivePalisadeSignals :many
-SELECT symbol, entry_price, target_price, min_exit_price, net_profit, score,
+SELECT symbol, sent_at, entry_price, target_price, min_exit_price, net_profit, score,
        status, invalidation_reason, valid_until, updated_at
 FROM palisade_signal
 WHERE status = 'ACTIVE'
@@ -378,21 +378,32 @@ ORDER BY id;
 
 -- name: GetOpenPaperTradeBySymbol :one
 SELECT * FROM paper_trade
-WHERE symbol = $1 AND status IN ('BUY_PENDING', 'POSITION_OPEN', 'SELL_PENDING')
+WHERE symbol = $1
+  AND strategy_version = $2
+  AND status IN ('BUY_PENDING', 'POSITION_OPEN', 'SELL_PENDING')
+ORDER BY id DESC
+LIMIT 1;
+
+-- name: GetPaperTradeBySignal :one
+SELECT * FROM paper_trade
+WHERE symbol = $1
+  AND signal_at = $2
+  AND strategy_version = $3
 ORDER BY id DESC
 LIMIT 1;
 
 -- name: CreatePaperTrade :one
 INSERT INTO paper_trade (
-    symbol, signal_at, status, entry_price, target_price, min_exit_price, quantity,
+    strategy_version, symbol, signal_at, status, entry_price, target_price, min_exit_price, quantity,
     filled_quantity, sold_quantity, buy_quote, sell_quote, fees, pnl, opened_at,
     closed_at, exit_reason, last_price, updated_at
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
 RETURNING *;
 
 -- name: ListOpenPaperTrades :many
 SELECT * FROM paper_trade
 WHERE status IN ('BUY_PENDING', 'POSITION_OPEN', 'SELL_PENDING')
+  AND strategy_version = $1
 ORDER BY id;
 
 -- name: UpdatePaperTrade :exec
@@ -416,9 +427,12 @@ WHERE id = $1;
 SELECT
     COUNT(*)::int AS total,
     COUNT(*) FILTER (WHERE status = 'CLOSED')::int AS closed,
+    COUNT(*) FILTER (WHERE status = 'CANCELED')::int AS canceled,
     COUNT(*) FILTER (WHERE status IN ('BUY_PENDING', 'POSITION_OPEN', 'SELL_PENDING'))::int AS open,
     COALESCE(SUM(pnl) FILTER (WHERE status = 'CLOSED'), 0)::double precision AS total_pnl,
+    COALESCE(SUM(pnl) FILTER (WHERE status IN ('POSITION_OPEN', 'SELL_PENDING')), 0)::double precision AS open_pnl,
     COALESCE(AVG(pnl) FILTER (WHERE status = 'CLOSED'), 0)::double precision AS average_pnl,
     COUNT(*) FILTER (WHERE status = 'CLOSED' AND pnl > 0)::int AS wins,
     COUNT(*) FILTER (WHERE status = 'CLOSED' AND pnl < 0)::int AS losses
-FROM paper_trade;
+FROM paper_trade
+WHERE strategy_version = $1;

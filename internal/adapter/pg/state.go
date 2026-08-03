@@ -765,6 +765,7 @@ func (u StateRepository) ListActivePalisadeSignals(ctx context.Context) ([]repo.
 	for _, row := range rows {
 		result = append(result, repo.PalisadeSignalState{
 			Symbol:             row.Symbol,
+			SentAt:             row.SentAt,
 			EntryPrice:         row.EntryPrice,
 			TargetPrice:        row.TargetPrice,
 			MinExitPrice:       row.MinExitPrice,
@@ -889,9 +890,12 @@ func mapOrderIntentToDomain(row palisade_database.PalisadeOrderIntent) *repo.Ord
 	}
 }
 
-func (u StateRepository) GetOpenPaperTradeBySymbol(ctx context.Context, symbol string) (*repo.PaperTrade, error) {
+func (u StateRepository) GetOpenPaperTradeBySymbol(ctx context.Context, symbol string, strategyVersion int) (*repo.PaperTrade, error) {
 	db := palisade_database.New(u.Postgree)
-	row, err := db.GetOpenPaperTradeBySymbol(ctx, symbol)
+	row, err := db.GetOpenPaperTradeBySymbol(ctx, palisade_database.GetOpenPaperTradeBySymbolParams{
+		Symbol:          symbol,
+		StrategyVersion: strategyVersion,
+	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil
@@ -901,9 +905,25 @@ func (u StateRepository) GetOpenPaperTradeBySymbol(ctx context.Context, symbol s
 	return mapPaperTradeToDomain(row), nil
 }
 
-func (u StateRepository) ListOpenPaperTrades(ctx context.Context) ([]repo.PaperTrade, error) {
+func (u StateRepository) GetPaperTradeBySignal(ctx context.Context, symbol string, signalAt time.Time, strategyVersion int) (*repo.PaperTrade, error) {
 	db := palisade_database.New(u.Postgree)
-	rows, err := db.ListOpenPaperTrades(ctx)
+	row, err := db.GetPaperTradeBySignal(ctx, palisade_database.GetPaperTradeBySignalParams{
+		Symbol:          symbol,
+		SignalAt:        signalAt,
+		StrategyVersion: strategyVersion,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, wrap.Errorf("get paper trade for %s signal %s: %w", symbol, signalAt.Format(time.RFC3339), err)
+	}
+	return mapPaperTradeToDomain(row), nil
+}
+
+func (u StateRepository) ListOpenPaperTrades(ctx context.Context, strategyVersion int) ([]repo.PaperTrade, error) {
+	db := palisade_database.New(u.Postgree)
+	rows, err := db.ListOpenPaperTrades(ctx, strategyVersion)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return []repo.PaperTrade{}, nil
@@ -920,24 +940,25 @@ func (u StateRepository) ListOpenPaperTrades(ctx context.Context) ([]repo.PaperT
 func (u StateRepository) CreatePaperTrade(ctx context.Context, trade repo.PaperTrade) (*repo.PaperTrade, error) {
 	db := palisade_database.New(u.Postgree)
 	row, err := db.CreatePaperTrade(ctx, palisade_database.CreatePaperTradeParams{
-		Symbol:         trade.Symbol,
-		SignalAt:       trade.SignalAt,
-		Status:         trade.Status,
-		EntryPrice:     trade.EntryPrice,
-		TargetPrice:    trade.TargetPrice,
-		MinExitPrice:   trade.MinExitPrice,
-		Quantity:       trade.Quantity,
-		FilledQuantity: trade.FilledQuantity,
-		SoldQuantity:   trade.SoldQuantity,
-		BuyQuote:       trade.BuyQuote,
-		SellQuote:      trade.SellQuote,
-		Fees:           trade.Fees,
-		Pnl:            trade.PnL,
-		OpenedAt:       trade.OpenedAt,
-		ClosedAt:       trade.ClosedAt,
-		ExitReason:     trade.ExitReason,
-		LastPrice:      trade.LastPrice,
-		UpdatedAt:      trade.UpdatedAt,
+		StrategyVersion: trade.StrategyVersion,
+		Symbol:          trade.Symbol,
+		SignalAt:        trade.SignalAt,
+		Status:          trade.Status,
+		EntryPrice:      trade.EntryPrice,
+		TargetPrice:     trade.TargetPrice,
+		MinExitPrice:    trade.MinExitPrice,
+		Quantity:        trade.Quantity,
+		FilledQuantity:  trade.FilledQuantity,
+		SoldQuantity:    trade.SoldQuantity,
+		BuyQuote:        trade.BuyQuote,
+		SellQuote:       trade.SellQuote,
+		Fees:            trade.Fees,
+		Pnl:             trade.PnL,
+		OpenedAt:        trade.OpenedAt,
+		ClosedAt:        trade.ClosedAt,
+		ExitReason:      trade.ExitReason,
+		LastPrice:       trade.LastPrice,
+		UpdatedAt:       trade.UpdatedAt,
 	})
 	if err != nil {
 		return nil, wrap.Errorf("create paper trade %s: %w", trade.Symbol, err)
@@ -968,17 +989,19 @@ func (u StateRepository) UpdatePaperTrade(ctx context.Context, trade repo.PaperT
 	return nil
 }
 
-func (u StateRepository) GetPaperTradeStats(ctx context.Context) (repo.PaperTradeStats, error) {
+func (u StateRepository) GetPaperTradeStats(ctx context.Context, strategyVersion int) (repo.PaperTradeStats, error) {
 	db := palisade_database.New(u.Postgree)
-	row, err := db.GetPaperTradeStats(ctx)
+	row, err := db.GetPaperTradeStats(ctx, strategyVersion)
 	if err != nil {
 		return repo.PaperTradeStats{}, wrap.Errorf("get paper trade stats: %w", err)
 	}
 	return repo.PaperTradeStats{
 		Total:      row.Total,
 		Closed:     row.Closed,
+		Canceled:   row.Canceled,
 		Open:       row.Open,
 		TotalPnL:   row.TotalPnl,
+		OpenPnL:    row.OpenPnl,
 		AveragePnL: row.AveragePnl,
 		Wins:       row.Wins,
 		Losses:     row.Losses,
@@ -987,25 +1010,26 @@ func (u StateRepository) GetPaperTradeStats(ctx context.Context) (repo.PaperTrad
 
 func mapPaperTradeToDomain(row palisade_database.PaperTrade) *repo.PaperTrade {
 	return &repo.PaperTrade{
-		ID:             row.ID,
-		Symbol:         row.Symbol,
-		SignalAt:       row.SignalAt,
-		Status:         row.Status,
-		EntryPrice:     row.EntryPrice,
-		TargetPrice:    row.TargetPrice,
-		MinExitPrice:   row.MinExitPrice,
-		Quantity:       row.Quantity,
-		FilledQuantity: row.FilledQuantity,
-		SoldQuantity:   row.SoldQuantity,
-		BuyQuote:       row.BuyQuote,
-		SellQuote:      row.SellQuote,
-		Fees:           row.Fees,
-		PnL:            row.Pnl,
-		OpenedAt:       row.OpenedAt,
-		ClosedAt:       row.ClosedAt,
-		ExitReason:     row.ExitReason,
-		LastPrice:      row.LastPrice,
-		UpdatedAt:      row.UpdatedAt,
+		ID:              row.ID,
+		StrategyVersion: row.StrategyVersion,
+		Symbol:          row.Symbol,
+		SignalAt:        row.SignalAt,
+		Status:          row.Status,
+		EntryPrice:      row.EntryPrice,
+		TargetPrice:     row.TargetPrice,
+		MinExitPrice:    row.MinExitPrice,
+		Quantity:        row.Quantity,
+		FilledQuantity:  row.FilledQuantity,
+		SoldQuantity:    row.SoldQuantity,
+		BuyQuote:        row.BuyQuote,
+		SellQuote:       row.SellQuote,
+		Fees:            row.Fees,
+		PnL:             row.Pnl,
+		OpenedAt:        row.OpenedAt,
+		ClosedAt:        row.ClosedAt,
+		ExitReason:      row.ExitReason,
+		LastPrice:       row.LastPrice,
+		UpdatedAt:       row.UpdatedAt,
 	}
 }
 

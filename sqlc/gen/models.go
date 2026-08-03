@@ -122,25 +122,26 @@ type PalisadeSignal struct {
 }
 
 type PaperTrade struct {
-	ID             int
-	Symbol         string
-	SignalAt       time.Time
-	Status         string
-	EntryPrice     float64
-	TargetPrice    float64
-	MinExitPrice   float64
-	Quantity       float64
-	FilledQuantity float64
-	SoldQuantity   float64
-	BuyQuote       float64
-	SellQuote      float64
-	Fees           float64
-	Pnl            float64
-	OpenedAt       *time.Time
-	ClosedAt       *time.Time
-	ExitReason     string
-	LastPrice      float64
-	UpdatedAt      time.Time
+	ID              int
+	StrategyVersion int
+	Symbol          string
+	SignalAt        time.Time
+	Status          string
+	EntryPrice      float64
+	TargetPrice     float64
+	MinExitPrice    float64
+	Quantity        float64
+	FilledQuantity  float64
+	SoldQuantity    float64
+	BuyQuote        float64
+	SellQuote       float64
+	Fees            float64
+	Pnl             float64
+	OpenedAt        *time.Time
+	ClosedAt        *time.Time
+	ExitReason      string
+	LastPrice       float64
+	UpdatedAt       time.Time
 }
 
 type State struct {
