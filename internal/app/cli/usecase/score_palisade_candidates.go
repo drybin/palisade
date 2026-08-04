@@ -11,6 +11,7 @@ import (
 
 	"github.com/drybin/palisade/internal/adapter/webapi"
 	"github.com/drybin/palisade/internal/domain/enum"
+	"github.com/drybin/palisade/internal/domain/enum/order"
 	"github.com/drybin/palisade/internal/domain/model/mexc"
 	"github.com/drybin/palisade/internal/domain/repo"
 	"github.com/drybin/palisade/pkg/wrap"
@@ -20,6 +21,8 @@ const (
 	defaultSignalOrderUSDT = 10.0
 	minSignalVolume24h     = 50000.0
 	minSignalNetProfit     = 0.006
+	maxSignalEntryRange    = 0.25
+	minimumReboundPercent  = 0.001
 	signalCooldown         = 60 * time.Minute
 	maxSignalCandidates    = 100
 	maxSignalsPerRun       = 3
@@ -94,7 +97,7 @@ func (u *ScorePalisadeCandidates) Process(ctx context.Context, debug bool) error
 			continue
 		}
 		signal, ok := buildPalisadeSignal(snapshot, symbol, *klines, time.Now().UTC())
-		if ok {
+		if ok && isExecutablePalisadeSignal(signal, symbol) {
 			candidates = append(candidates, signal)
 		}
 		if len(candidates) >= maxSignalCandidates {
@@ -117,15 +120,17 @@ func (u *ScorePalisadeCandidates) Process(ctx context.Context, debug bool) error
 			return err
 		}
 		state := repo.PalisadeSignalState{
-			Symbol:       candidate.symbol,
-			EntryPrice:   candidate.support,
-			TargetPrice:  candidate.resistance,
-			MinExitPrice: candidate.minExitPrice,
-			NetProfit:    candidate.netProfit,
-			Score:        candidate.score,
-			Status:       "ACTIVE",
-			ValidUntil:   now.Add(30 * time.Minute),
-			UpdatedAt:    now,
+			Symbol:          candidate.symbol,
+			StrategyVersion: paperStrategyVersion,
+			SupportPrice:    candidate.support,
+			EntryPrice:      candidate.current,
+			TargetPrice:     candidate.resistance,
+			MinExitPrice:    candidate.minExitPrice,
+			NetProfit:       candidate.netProfit,
+			Score:           candidate.score,
+			Status:          "ACTIVE",
+			ValidUntil:      now.Add(30 * time.Minute),
+			UpdatedAt:       now,
 		}
 		if lastSent != nil && now.Sub(*lastSent) < signalCooldown {
 			if err := u.stateRepo.SavePalisadeSignalState(ctx, state); err != nil {
@@ -190,8 +195,11 @@ func buildPalisadeSignal(snapshot repo.MarketSnapshot, symbol mexc.SymbolDetail,
 		return palisadeSignal{}, false
 	}
 	rangeValue := resistance - support
-	current := (snapshot.BidPrice + snapshot.AskPrice) / 2
-	if current < support || current > support+rangeValue*0.30 {
+	if snapshot.BidPrice < support {
+		return palisadeSignal{}, false
+	}
+	current := snapshot.AskPrice
+	if current < support || current > support+rangeValue*maxSignalEntryRange {
 		return palisadeSignal{}, false
 	}
 	first := closed[0].Close
@@ -212,10 +220,14 @@ func buildPalisadeSignal(snapshot repo.MarketSnapshot, symbol mexc.SymbolDetail,
 	if supportTouches < 2 || resistanceTouches < 2 {
 		return palisadeSignal{}, false
 	}
+	lastClosed := rangeKlines[len(rangeKlines)-1]
+	if lastClosed.Low > support+tolerance || lastClosed.Close < support*(1+minimumReboundPercent) {
+		return palisadeSignal{}, false
+	}
 	makerFee := parseDecimal(symbol.MakerCommission)
 	takerFee := parseDecimal(symbol.TakerCommission)
 	fee := math.Max(makerFee, takerFee)
-	entry := support
+	entry := current
 	spread := (snapshot.AskPrice - snapshot.BidPrice) / snapshot.BidPrice
 	target, minExitPrice, ok := calculateDynamicTarget(entry, resistance, fee, spread)
 	if !ok {
@@ -227,10 +239,20 @@ func buildPalisadeSignal(snapshot repo.MarketSnapshot, symbol mexc.SymbolDetail,
 	}
 	score := int(netProfit*10000) + supportTouches*10 + resistanceTouches*10 - int(math.Abs((last-first)/first)*1000)
 	return palisadeSignal{
-		symbol: symbol.Symbol, baseAsset: symbol.BaseAsset, current: current, support: entry,
+		symbol: symbol.Symbol, baseAsset: symbol.BaseAsset, current: current, support: support,
 		resistance: target, minExitPrice: minExitPrice, netProfit: netProfit, spread: spread,
 		volume: snapshot.QuoteVolume24h, touchesSupport: supportTouches, touchesResistance: resistanceTouches, score: score,
 	}, true
+}
+
+func isExecutablePalisadeSignal(signal palisadeSignal, symbol mexc.SymbolDetail) bool {
+	step, err := swapLotStep(&symbol)
+	if err != nil {
+		return false
+	}
+	entry := roundPriceUp(signal.current, signalPriceStep(&symbol))
+	quantity := swapRoundQtyDown(defaultSignalOrderUSDT/entry, step)
+	return quantity > 0 && isValidPaperOrder(symbol, order.BUY, entry, quantity)
 }
 
 func calculateDynamicTarget(entry, resistance, fee, spread float64) (target, minExitPrice float64, ok bool) {
@@ -266,7 +288,7 @@ func parseDecimal(value string) float64 {
 
 func formatPalisadeSignal(signal palisadeSignal, now time.Time) string {
 	return fmt.Sprintf(
-		"<b>📊 Палисада-кандидат</b> %s (%s)\n"+
+		"<b>📊 Палисада-кандидат v3</b> %s (%s)\n"+
 			"Цена: %s\nВход: %s | Цель: %s\n"+
 			"Net-прибыль: %.2f%%\nКасания: S=%d, R=%d\n"+
 			"Расчётный объём: %.2f USDT\n"+

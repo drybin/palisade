@@ -325,19 +325,21 @@ ON CONFLICT (symbol) DO UPDATE SET sent_at = EXCLUDED.sent_at, score = EXCLUDED.
 
 -- name: SavePalisadeSignalState :exec
 UPDATE palisade_signal
-SET entry_price = $2,
-    target_price = $3,
-    min_exit_price = $4,
-    net_profit = $5,
-    score = $6,
-    status = $7,
-    invalidation_reason = $8,
-    valid_until = $9,
-    updated_at = $10
+SET strategy_version = $2,
+    support_price = $3,
+    entry_price = $4,
+    target_price = $5,
+    min_exit_price = $6,
+    net_profit = $7,
+    score = $8,
+    status = $9,
+    invalidation_reason = $10,
+    valid_until = $11,
+    updated_at = $12
 WHERE symbol = $1;
 
 -- name: ListActivePalisadeSignals :many
-SELECT symbol, sent_at, entry_price, target_price, min_exit_price, net_profit, score,
+SELECT symbol, sent_at, strategy_version, support_price, entry_price, target_price, min_exit_price, net_profit, score,
        status, invalidation_reason, valid_until, updated_at
 FROM palisade_signal
 WHERE status = 'ACTIVE'
@@ -394,10 +396,10 @@ LIMIT 1;
 
 -- name: CreatePaperTrade :one
 INSERT INTO paper_trade (
-    strategy_version, symbol, signal_at, status, entry_price, target_price, min_exit_price, quantity,
+    strategy_version, symbol, signal_at, status, entry_mode, support_price, entry_price, target_price, min_exit_price, expected_net_profit, quantity,
     filled_quantity, sold_quantity, buy_quote, sell_quote, fees, pnl, opened_at,
     closed_at, exit_reason, last_price, updated_at
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
 RETURNING *;
 
 -- name: ListOpenPaperTrades :many

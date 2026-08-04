@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/drybin/palisade/internal/domain/model/mexc"
 	"github.com/drybin/palisade/internal/domain/repo"
 )
 
@@ -58,5 +59,44 @@ func TestPaperSignalAt_prefersSentAt(t *testing.T) {
 func TestPaperFillQuantity_doesNotExceedRemaining(t *testing.T) {
 	if got := paperFillQuantity(2, 10); got != 2 {
 		t.Fatalf("expected 2, got %.8f", got)
+	}
+}
+
+func TestBuildPaperTrade_v3KeepsSupportAndAskEntry(t *testing.T) {
+	trade, ok, err := buildPaperTrade(
+		repo.PalisadeSignalState{
+			Symbol: "TESTUSDT", SupportPrice: 100, EntryPrice: 100.1,
+			TargetPrice: 102, MinExitPrice: 101, NetProfit: 0.01,
+		},
+		mexc.BookTicker{Symbol: "TESTUSDT", BidPrice: "100", AskPrice: "100.1"},
+		mexc.SymbolDetail{
+			Symbol: "TESTUSDT", Status: "1", IsSpotTradingAllowed: true,
+			OrderTypes: []string{"LIMIT"}, QuotePrecision: 2, QuoteAmountPrecision: "1",
+			BaseSizePrecision: "0.001", Filters: []mexc.SymbolFilter{{FilterType: "LOT_SIZE", StepSize: "0.001", MinQty: "0.001"}},
+		},
+		time.Now().UTC(),
+	)
+	if err != nil || !ok {
+		t.Fatalf("expected valid v3 paper trade, ok=%v err=%v", ok, err)
+	}
+	if trade.EntryMode != "REBOUND_ASK" || math.Abs(trade.SupportPrice-100) > 1e-12 || math.Abs(trade.EntryPrice-100.1) > 1e-12 {
+		t.Fatalf("unexpected v3 levels: mode=%s support=%.4f entry=%.4f", trade.EntryMode, trade.SupportPrice, trade.EntryPrice)
+	}
+	if math.Abs(trade.ExpectedNetProfit-0.01) > 1e-12 {
+		t.Fatalf("expected net profit 0.01, got %.8f", trade.ExpectedNetProfit)
+	}
+}
+
+func TestPaperTrade_legacySupportFallsBackToEntry(t *testing.T) {
+	trade := repo.PaperTrade{EntryPrice: 100}
+	if trade.SupportPrice != 0 {
+		t.Fatalf("expected legacy trade without stored support, got %.8f", trade.SupportPrice)
+	}
+	support := trade.SupportPrice
+	if support <= 0 {
+		support = trade.EntryPrice
+	}
+	if support != 100 {
+		t.Fatalf("expected fallback support 100, got %.8f", support)
 	}
 }

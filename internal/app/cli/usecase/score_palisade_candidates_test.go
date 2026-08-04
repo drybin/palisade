@@ -45,8 +45,40 @@ func TestBuildPalisadeSignal_requiresStableRangeAndNetProfit(t *testing.T) {
 	if signal.netProfit < minSignalNetProfit {
 		t.Fatalf("expected net profit >= %.4f, got %.4f", minSignalNetProfit, signal.netProfit)
 	}
+	if signal.current != snapshot.AskPrice {
+		t.Fatalf("expected entry at current ask %.4f, got %.4f", snapshot.AskPrice, signal.current)
+	}
+	if signal.support >= signal.current {
+		t.Fatalf("expected rebound entry above support, support=%.4f entry=%.4f", signal.support, signal.current)
+	}
 	if signal.touchesSupport < 2 || signal.touchesResistance < 2 {
 		t.Fatalf("expected repeated touches, got support=%d resistance=%d", signal.touchesSupport, signal.touchesResistance)
+	}
+}
+
+func TestBuildPalisadeSignal_requiresLastClosedCandleRebound(t *testing.T) {
+	now := time.Now().UTC()
+	klines := make(mexc.Klines, 0, 96)
+	for i := 0; i < 96; i++ {
+		price := 100.0
+		if i%8 == 4 {
+			price = 102.0
+		}
+		open := now.Add(-time.Duration(97-i) * 15 * time.Minute)
+		klines = append(klines, mexc.Kline{
+			OpenTime: open.UnixMilli(), Open: price, High: price + 0.1,
+			Low: price - 0.1, Close: price,
+			CloseTime: open.Add(15 * time.Minute).UnixMilli(),
+		})
+	}
+	klines[len(klines)-1].Low = 100.3
+	klines[len(klines)-1].High = 100.5
+	klines[len(klines)-1].Close = 100.3
+
+	snapshot := repo.MarketSnapshot{Symbol: "NOREBOUNDUSDT", BidPrice: 100.2, AskPrice: 100.3, QuoteVolume24h: 100000}
+	symbol := mexc.SymbolDetail{Symbol: "NOREBOUNDUSDT", MakerCommission: "0", TakerCommission: "0"}
+	if _, ok := buildPalisadeSignal(snapshot, symbol, klines, now); ok {
+		t.Fatal("expected a range without a recent support touch to be rejected")
 	}
 }
 

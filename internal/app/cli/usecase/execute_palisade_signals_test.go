@@ -26,6 +26,12 @@ func TestRoundPriceDown(t *testing.T) {
 	}
 }
 
+func TestRoundPriceUp(t *testing.T) {
+	if got := roundPriceUp(0.018441, 0.00001); got != 0.01845 {
+		t.Fatalf("expected 0.01845, got %.8f", got)
+	}
+}
+
 func TestValidateLimitOrder_rejectsBelowMinimums(t *testing.T) {
 	symbol := mexc.SymbolDetail{
 		Symbol:               "TESTUSDT",

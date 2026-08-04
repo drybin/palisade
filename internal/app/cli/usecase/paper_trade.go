@@ -16,7 +16,8 @@ import (
 
 const (
 	paperLockKey         = "palisade:paper-trading"
-	paperStrategyVersion = 2
+	paperStrategyVersion = 3
+	maxPaperOpenTrades   = 1
 )
 
 type IPaperTrade interface {
@@ -69,23 +70,40 @@ func (u *PaperTradeRunner) Process(ctx context.Context, debug bool) error {
 	if err != nil {
 		return err
 	}
+	legacyOpenTrades, err := u.stateRepo.ListOpenPaperTrades(ctx, paperStrategyVersion-1)
+	if err != nil {
+		return err
+	}
+	openTrades = append(legacyOpenTrades, openTrades...)
 	openBySymbol := make(map[string]repo.PaperTrade, len(openTrades))
 	for _, trade := range openTrades {
-		openBySymbol[trade.Symbol] = trade
+		if trade.StrategyVersion == paperStrategyVersion {
+			openBySymbol[trade.Symbol] = trade
+		}
 	}
 
+	openSlotsUsed := 0
 	for i := range openTrades {
 		trade := openTrades[i]
 		if err := u.processPaperTrade(ctx, &trade, signalFor(signals, trade.Symbol), bookBySymbol[trade.Symbol], bySymbol[trade.Symbol], time.Now().UTC()); err != nil {
 			return err
 		}
+		if trade.StrategyVersion == paperStrategyVersion && isOpenPaperTrade(trade) {
+			openSlotsUsed++
+		}
 		if debug {
-			fmt.Printf("paper %s: status=%s filled=%.8f sold=%.8f mark_pnl=%.8f\n", trade.Symbol, trade.Status, trade.FilledQuantity, trade.SoldQuantity, trade.PnL)
+			fmt.Printf("paper %s: status=%s mode=%s support=%.8f filled=%.8f sold=%.8f mark_pnl=%.8f\n", trade.Symbol, trade.Status, trade.EntryMode, trade.SupportPrice, trade.FilledQuantity, trade.SoldQuantity, trade.PnL)
 		}
 	}
 
 	created := 0
 	for _, signal := range signals {
+		if openSlotsUsed >= maxPaperOpenTrades {
+			break
+		}
+		if signal.StrategyVersion != paperStrategyVersion {
+			continue
+		}
 		if _, exists := openBySymbol[signal.Symbol]; exists {
 			continue
 		}
@@ -123,6 +141,7 @@ func (u *PaperTradeRunner) Process(ctx context.Context, debug bool) error {
 			return err
 		}
 		created++
+		openSlotsUsed++
 		if err := u.processPaperTrade(ctx, createdTrade, signal, book, symbol, time.Now().UTC()); err != nil {
 			return err
 		}
@@ -138,12 +157,21 @@ func (u *PaperTradeRunner) Process(ctx context.Context, debug bool) error {
 	return nil
 }
 
+func isOpenPaperTrade(trade repo.PaperTrade) bool {
+	return trade.Status == "BUY_PENDING" || trade.Status == "POSITION_OPEN" || trade.Status == "SELL_PENDING"
+}
+
 func buildPaperTrade(signal repo.PalisadeSignalState, book mexc.BookTicker, symbol mexc.SymbolDetail, now time.Time) (repo.PaperTrade, bool, error) {
 	bid, ask, err := parseBook(book)
 	if err != nil || ask <= bid || ask <= 0 {
 		return repo.PaperTrade{}, false, nil
 	}
-	entry := roundPriceDown(signal.EntryPrice, signalPriceStep(&symbol))
+	priceStep := signalPriceStep(&symbol)
+	entry := roundPriceUp(signal.EntryPrice, priceStep)
+	support := roundPriceDown(signal.SupportPrice, priceStep)
+	if support <= 0 {
+		support = entry
+	}
 	step, err := swapLotStep(&symbol)
 	if err != nil {
 		return repo.PaperTrade{}, false, err
@@ -153,16 +181,19 @@ func buildPaperTrade(signal repo.PalisadeSignalState, book mexc.BookTicker, symb
 		return repo.PaperTrade{}, false, nil
 	}
 	return repo.PaperTrade{
-		StrategyVersion: paperStrategyVersion,
-		Symbol:          signal.Symbol,
-		SignalAt:        paperSignalAt(signal),
-		Status:          "BUY_PENDING",
-		EntryPrice:      entry,
-		TargetPrice:     roundPriceDown(signal.TargetPrice, signalPriceStep(&symbol)),
-		MinExitPrice:    roundPriceDown(signal.MinExitPrice, signalPriceStep(&symbol)),
-		Quantity:        quantity,
-		LastPrice:       (bid + ask) / 2,
-		UpdatedAt:       now,
+		StrategyVersion:   paperStrategyVersion,
+		Symbol:            signal.Symbol,
+		SignalAt:          paperSignalAt(signal),
+		Status:            "BUY_PENDING",
+		EntryMode:         "REBOUND_ASK",
+		SupportPrice:      support,
+		EntryPrice:        entry,
+		TargetPrice:       roundPriceDown(signal.TargetPrice, signalPriceStep(&symbol)),
+		MinExitPrice:      roundPriceDown(signal.MinExitPrice, signalPriceStep(&symbol)),
+		ExpectedNetProfit: signal.NetProfit,
+		Quantity:          quantity,
+		LastPrice:         (bid + ask) / 2,
+		UpdatedAt:         now,
 	}, true, nil
 }
 
@@ -179,7 +210,7 @@ func (u *PaperTradeRunner) processPaperTrade(ctx context.Context, trade *repo.Pa
 	trade.LastPrice = (bid + ask) / 2
 	fee := math.Max(parseDecimal(symbol.MakerCommission), parseDecimal(symbol.TakerCommission))
 
-	if signal.Symbol == trade.Symbol && signal.TargetPrice >= signal.MinExitPrice {
+	if signal.Symbol == trade.Symbol && signal.StrategyVersion == trade.StrategyVersion && signal.TargetPrice >= signal.MinExitPrice {
 		trade.TargetPrice = roundPriceDown(signal.TargetPrice, signalPriceStep(&symbol))
 		trade.MinExitPrice = roundPriceDown(signal.MinExitPrice, signalPriceStep(&symbol))
 	}
@@ -217,7 +248,11 @@ func (u *PaperTradeRunner) processPaperTrade(ctx context.Context, trade *repo.Pa
 			return u.persistPaperTrade(ctx, trade, now, bid, fee)
 		}
 		buyPrice := trade.BuyQuote / trade.FilledQuantity
-		reason := emergencyReason(now, paperOpenedAt(*trade), bid, trade.EntryPrice, buyPrice)
+		support := trade.SupportPrice
+		if support <= 0 {
+			support = trade.EntryPrice
+		}
+		reason := emergencyReason(now, paperOpenedAt(*trade), bid, support, buyPrice)
 		shouldSell := reason != "" || bid >= trade.TargetPrice
 		if shouldSell {
 			if reason == "" {

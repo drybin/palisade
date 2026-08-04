@@ -842,6 +842,13 @@ func roundPriceDown(price, step float64) float64 {
 	return math.Floor(price/step) * step
 }
 
+func roundPriceUp(price, step float64) float64 {
+	if step <= 0 {
+		return price
+	}
+	return math.Ceil(price/step-1e-12) * step
+}
+
 func parseBook(book mexc.BookTicker) (bid, ask float64, err error) {
 	bid, err = strconv.ParseFloat(book.BidPrice, 64)
 	if err != nil {
