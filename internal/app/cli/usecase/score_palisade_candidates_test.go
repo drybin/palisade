@@ -143,4 +143,7 @@ func TestCalculateDynamicTarget_acceptsTargetWithMinimumProfit(t *testing.T) {
 	if target < minExit {
 		t.Fatalf("expected target >= minimum exit, got target=%.4f minExit=%.4f", target, minExit)
 	}
+	if target != 101.95 {
+		t.Fatalf("expected target at 65%% of range, got %.4f", target)
+	}
 }

@@ -15,9 +15,10 @@ import (
 )
 
 const (
-	paperLockKey         = "palisade:paper-trading"
-	paperStrategyVersion = 3
-	maxPaperOpenTrades   = 1
+	paperLockKey               = "palisade:paper-trading"
+	paperStrategyVersion       = 4
+	maxPaperOpenTrades         = 1
+	paperBreakEvenTriggerShare = 0.35
 )
 
 type IPaperTrade interface {
@@ -92,7 +93,7 @@ func (u *PaperTradeRunner) Process(ctx context.Context, debug bool) error {
 			openSlotsUsed++
 		}
 		if debug {
-			fmt.Printf("paper %s: status=%s mode=%s support=%.8f filled=%.8f sold=%.8f mark_pnl=%.8f\n", trade.Symbol, trade.Status, trade.EntryMode, trade.SupportPrice, trade.FilledQuantity, trade.SoldQuantity, trade.PnL)
+			fmt.Printf("paper %s: status=%s mode=%s support=%.8f break_even=%t filled=%.8f sold=%.8f mark_pnl=%.8f\n", trade.Symbol, trade.Status, trade.EntryMode, trade.SupportPrice, trade.BreakEvenArmed, trade.FilledQuantity, trade.SoldQuantity, trade.PnL)
 		}
 	}
 
@@ -185,7 +186,7 @@ func buildPaperTrade(signal repo.PalisadeSignalState, book mexc.BookTicker, symb
 		Symbol:            signal.Symbol,
 		SignalAt:          paperSignalAt(signal),
 		Status:            "BUY_PENDING",
-		EntryMode:         "REBOUND_ASK",
+		EntryMode:         "REBOUND_ASK_V4",
 		SupportPrice:      support,
 		EntryPrice:        entry,
 		TargetPrice:       roundPriceDown(signal.TargetPrice, signalPriceStep(&symbol)),
@@ -252,7 +253,10 @@ func (u *PaperTradeRunner) processPaperTrade(ctx context.Context, trade *repo.Pa
 		if support <= 0 {
 			support = trade.EntryPrice
 		}
-		reason := emergencyReason(now, paperOpenedAt(*trade), bid, support, buyPrice)
+		if trade.StrategyVersion == paperStrategyVersion && !trade.BreakEvenArmed && bid >= paperBreakEvenTrigger(buyPrice, trade.TargetPrice, fee) {
+			trade.BreakEvenArmed = true
+		}
+		reason := paperExitReason(*trade, now, bid, support, buyPrice, fee)
 		shouldSell := reason != "" || bid >= trade.TargetPrice
 		if shouldSell {
 			if reason == "" {
@@ -280,6 +284,25 @@ func (u *PaperTradeRunner) processPaperTrade(ctx context.Context, trade *repo.Pa
 		}
 	}
 	return u.persistPaperTrade(ctx, trade, now, bid, fee)
+}
+
+func paperExitReason(trade repo.PaperTrade, now time.Time, bid, support, buyPrice, fee float64) string {
+	if trade.StrategyVersion == paperStrategyVersion && trade.BreakEvenArmed && bid <= paperBreakEvenBidPrice(buyPrice, fee) {
+		return "BREAKEVEN_STOP"
+	}
+	return emergencyReason(now, paperOpenedAt(trade), bid, support, buyPrice)
+}
+
+func paperBreakEvenTrigger(buyPrice, targetPrice, fee float64) float64 {
+	trigger := buyPrice + (targetPrice-buyPrice)*paperBreakEvenTriggerShare
+	return math.Max(trigger, paperBreakEvenBidPrice(buyPrice, fee)*1.0005)
+}
+
+func paperBreakEvenBidPrice(buyPrice, fee float64) float64 {
+	if buyPrice <= 0 || fee < 0 || fee >= 1 {
+		return math.Inf(1)
+	}
+	return buyPrice * (1 + fee) / ((1 - emergencyPriceDiscount) * (1 - fee))
 }
 
 func (u *PaperTradeRunner) persistPaperTrade(

@@ -74,6 +74,7 @@ type PaperTrade struct {
 	TargetPrice       float64
 	MinExitPrice      float64
 	ExpectedNetProfit float64
+	BreakEvenArmed    bool
 	Quantity          float64
 	FilledQuantity    float64
 	SoldQuantity      float64

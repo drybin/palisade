@@ -23,6 +23,7 @@ const (
 	minSignalNetProfit     = 0.006
 	maxSignalEntryRange    = 0.25
 	minimumReboundPercent  = 0.001
+	signalTargetRangeShare = 0.65
 	signalCooldown         = 60 * time.Minute
 	maxSignalCandidates    = 100
 	maxSignalsPerRun       = 3
@@ -259,7 +260,7 @@ func calculateDynamicTarget(entry, resistance, fee, spread float64) (target, min
 	if entry <= 0 || resistance <= entry || fee < 0 || spread < 0 {
 		return 0, 0, false
 	}
-	target = resistance * 0.999
+	target = entry + (resistance-entry)*signalTargetRangeShare
 	minExitPrice = entry * (1 + 2*fee + 0.001 + spread + minSignalNetProfit)
 	return target, minExitPrice, target >= minExitPrice
 }
@@ -288,7 +289,7 @@ func parseDecimal(value string) float64 {
 
 func formatPalisadeSignal(signal palisadeSignal, now time.Time) string {
 	return fmt.Sprintf(
-		"<b>📊 Палисада-кандидат v3</b> %s (%s)\n"+
+		"<b>📊 Палисада-кандидат v4</b> %s (%s)\n"+
 			"Цена: %s\nВход: %s | Цель: %s\n"+
 			"Net-прибыль: %.2f%%\nКасания: S=%d, R=%d\n"+
 			"Расчётный объём: %.2f USDT\n"+

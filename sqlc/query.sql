@@ -396,10 +396,10 @@ LIMIT 1;
 
 -- name: CreatePaperTrade :one
 INSERT INTO paper_trade (
-    strategy_version, symbol, signal_at, status, entry_mode, support_price, entry_price, target_price, min_exit_price, expected_net_profit, quantity,
+    strategy_version, symbol, signal_at, status, entry_mode, support_price, entry_price, target_price, min_exit_price, expected_net_profit, break_even_armed, quantity,
     filled_quantity, sold_quantity, buy_quote, sell_quote, fees, pnl, opened_at,
     closed_at, exit_reason, last_price, updated_at
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)
 RETURNING *;
 
 -- name: ListOpenPaperTrades :many
@@ -412,17 +412,18 @@ ORDER BY id;
 UPDATE paper_trade SET
     status = $2,
     target_price = $3,
-    filled_quantity = $4,
-    sold_quantity = $5,
-    buy_quote = $6,
-    sell_quote = $7,
-    fees = $8,
-    pnl = $9,
-    opened_at = $10,
-    closed_at = $11,
-    exit_reason = $12,
-    last_price = $13,
-    updated_at = $14
+    break_even_armed = $4,
+    filled_quantity = $5,
+    sold_quantity = $6,
+    buy_quote = $7,
+    sell_quote = $8,
+    fees = $9,
+    pnl = $10,
+    opened_at = $11,
+    closed_at = $12,
+    exit_reason = $13,
+    last_price = $14,
+    updated_at = $15
 WHERE id = $1;
 
 -- name: GetPaperTradeStats :one

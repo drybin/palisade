@@ -62,7 +62,7 @@ func TestPaperFillQuantity_doesNotExceedRemaining(t *testing.T) {
 	}
 }
 
-func TestBuildPaperTrade_v3KeepsSupportAndAskEntry(t *testing.T) {
+func TestBuildPaperTrade_v4KeepsSupportAndAskEntry(t *testing.T) {
 	trade, ok, err := buildPaperTrade(
 		repo.PalisadeSignalState{
 			Symbol: "TESTUSDT", SupportPrice: 100, EntryPrice: 100.1,
@@ -77,13 +77,33 @@ func TestBuildPaperTrade_v3KeepsSupportAndAskEntry(t *testing.T) {
 		time.Now().UTC(),
 	)
 	if err != nil || !ok {
-		t.Fatalf("expected valid v3 paper trade, ok=%v err=%v", ok, err)
+		t.Fatalf("expected valid v4 paper trade, ok=%v err=%v", ok, err)
 	}
-	if trade.EntryMode != "REBOUND_ASK" || math.Abs(trade.SupportPrice-100) > 1e-12 || math.Abs(trade.EntryPrice-100.1) > 1e-12 {
-		t.Fatalf("unexpected v3 levels: mode=%s support=%.4f entry=%.4f", trade.EntryMode, trade.SupportPrice, trade.EntryPrice)
+	if trade.EntryMode != "REBOUND_ASK_V4" || math.Abs(trade.SupportPrice-100) > 1e-12 || math.Abs(trade.EntryPrice-100.1) > 1e-12 {
+		t.Fatalf("unexpected v4 levels: mode=%s support=%.4f entry=%.4f", trade.EntryMode, trade.SupportPrice, trade.EntryPrice)
 	}
 	if math.Abs(trade.ExpectedNetProfit-0.01) > 1e-12 {
 		t.Fatalf("expected net profit 0.01, got %.8f", trade.ExpectedNetProfit)
+	}
+}
+
+func TestPaperExitReason_usesBreakEvenOnlyForV4(t *testing.T) {
+	fee := 0.001
+	buyPrice := 100.0
+	breakEvenBid := paperBreakEvenBidPrice(buyPrice, fee)
+	now := time.Now().UTC()
+
+	v4Trade := repo.PaperTrade{StrategyVersion: paperStrategyVersion, BreakEvenArmed: true}
+	if got := paperExitReason(v4Trade, now, breakEvenBid, 90, buyPrice, fee); got != "BREAKEVEN_STOP" {
+		t.Fatalf("expected breakeven stop, got %q", got)
+	}
+	if trigger := paperBreakEvenTrigger(buyPrice, 101, fee); trigger <= breakEvenBid {
+		t.Fatalf("expected trigger %.8f above break-even %.8f", trigger, breakEvenBid)
+	}
+
+	legacyTrade := repo.PaperTrade{StrategyVersion: paperStrategyVersion - 1, BreakEvenArmed: true, SignalAt: now}
+	if got := paperExitReason(legacyTrade, now, breakEvenBid, 90, buyPrice, fee); got != "" {
+		t.Fatalf("expected no v3 break-even stop, got %q", got)
 	}
 }
 
