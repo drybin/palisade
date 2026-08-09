@@ -17,7 +17,7 @@ func TestBuildPalisadeSignal_requiresStableRangeAndNetProfit(t *testing.T) {
 			price = 100.2
 		}
 		if i%8 == 4 {
-			price = 102.0
+			price = 103.0
 		}
 		open := now.Add(-time.Duration(96-i) * 15 * time.Minute)
 		klines = append(klines, mexc.Kline{
@@ -29,6 +29,14 @@ func TestBuildPalisadeSignal_requiresStableRangeAndNetProfit(t *testing.T) {
 			CloseTime: open.Add(15 * time.Minute).UnixMilli(),
 		})
 	}
+	klines[len(klines)-2].Open = 99.95
+	klines[len(klines)-2].Low = 99.90
+	klines[len(klines)-2].High = 100.25
+	klines[len(klines)-2].Close = 100.15
+	klines[len(klines)-1].Open = 100.16
+	klines[len(klines)-1].Low = 100.15
+	klines[len(klines)-1].High = 100.35
+	klines[len(klines)-1].Close = 100.30
 
 	snapshot := repo.MarketSnapshot{
 		Symbol:         "TESTUSDT",
@@ -73,12 +81,13 @@ func TestBuildPalisadeSignal_requiresLastClosedCandleRebound(t *testing.T) {
 	}
 	klines[len(klines)-1].Low = 100.3
 	klines[len(klines)-1].High = 100.5
+	klines[len(klines)-1].Open = 100.4
 	klines[len(klines)-1].Close = 100.3
 
 	snapshot := repo.MarketSnapshot{Symbol: "NOREBOUNDUSDT", BidPrice: 100.2, AskPrice: 100.3, QuoteVolume24h: 100000}
 	symbol := mexc.SymbolDetail{Symbol: "NOREBOUNDUSDT", MakerCommission: "0", TakerCommission: "0"}
 	if _, ok := buildPalisadeSignal(snapshot, symbol, klines, now); ok {
-		t.Fatal("expected a range without a recent support touch to be rejected")
+		t.Fatal("expected a range without a bullish confirmation candle to be rejected")
 	}
 }
 
@@ -143,7 +152,7 @@ func TestCalculateDynamicTarget_acceptsTargetWithMinimumProfit(t *testing.T) {
 	if target < minExit {
 		t.Fatalf("expected target >= minimum exit, got target=%.4f minExit=%.4f", target, minExit)
 	}
-	if target != 101.95 {
-		t.Fatalf("expected target at 65%% of range, got %.4f", target)
+	if target != 101.2 {
+		t.Fatalf("expected target at 40%% of range, got %.4f", target)
 	}
 }

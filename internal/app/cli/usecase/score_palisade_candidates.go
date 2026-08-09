@@ -21,9 +21,9 @@ const (
 	defaultSignalOrderUSDT = 10.0
 	minSignalVolume24h     = 50000.0
 	minSignalNetProfit     = 0.006
-	maxSignalEntryRange    = 0.25
+	maxSignalEntryRange    = 0.20
 	minimumReboundPercent  = 0.001
-	signalTargetRangeShare = 0.65
+	signalTargetRangeShare = 0.40
 	signalCooldown         = 60 * time.Minute
 	maxSignalCandidates    = 100
 	maxSignalsPerRun       = 3
@@ -221,8 +221,12 @@ func buildPalisadeSignal(snapshot repo.MarketSnapshot, symbol mexc.SymbolDetail,
 	if supportTouches < 2 || resistanceTouches < 2 {
 		return palisadeSignal{}, false
 	}
-	lastClosed := rangeKlines[len(rangeKlines)-1]
-	if lastClosed.Low > support+tolerance || lastClosed.Close < support*(1+minimumReboundPercent) {
+	touchCandle := rangeKlines[len(rangeKlines)-2]
+	confirmationCandle := rangeKlines[len(rangeKlines)-1]
+	if touchCandle.Low > support+tolerance || touchCandle.Close < support*(1+minimumReboundPercent) {
+		return palisadeSignal{}, false
+	}
+	if confirmationCandle.Close <= confirmationCandle.Open || confirmationCandle.Close <= touchCandle.Close {
 		return palisadeSignal{}, false
 	}
 	makerFee := parseDecimal(symbol.MakerCommission)
@@ -289,7 +293,7 @@ func parseDecimal(value string) float64 {
 
 func formatPalisadeSignal(signal palisadeSignal, now time.Time) string {
 	return fmt.Sprintf(
-		"<b>📊 Палисада-кандидат v4</b> %s (%s)\n"+
+		"<b>📊 Палисада-кандидат v5</b> %s (%s)\n"+
 			"Цена: %s\nВход: %s | Цель: %s\n"+
 			"Net-прибыль: %.2f%%\nКасания: S=%d, R=%d\n"+
 			"Расчётный объём: %.2f USDT\n"+

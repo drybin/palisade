@@ -182,6 +182,8 @@ CREATE TABLE paper_trade (
     min_exit_price  DOUBLE PRECISION NOT NULL,
     expected_net_profit DOUBLE PRECISION NOT NULL DEFAULT 0,
     break_even_armed BOOLEAN NOT NULL DEFAULT false,
+    max_bid_price   DOUBLE PRECISION NOT NULL DEFAULT 0,
+    min_bid_price   DOUBLE PRECISION NOT NULL DEFAULT 0,
     quantity        DOUBLE PRECISION NOT NULL,
     filled_quantity DOUBLE PRECISION NOT NULL DEFAULT 0,
     sold_quantity   DOUBLE PRECISION NOT NULL DEFAULT 0,
