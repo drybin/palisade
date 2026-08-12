@@ -16,7 +16,7 @@ import (
 
 const (
 	paperLockKey               = "palisade:paper-trading"
-	paperStrategyVersion       = 5
+	paperStrategyVersion       = 6
 	maxPaperOpenTrades         = 1
 	paperBreakEvenTriggerShare = 0.35
 )
@@ -167,6 +167,10 @@ func buildPaperTrade(signal repo.PalisadeSignalState, book mexc.BookTicker, symb
 	if err != nil || ask <= bid || ask <= 0 {
 		return repo.PaperTrade{}, false, nil
 	}
+	askQty, err := parseDecimalValue(book.AskQty)
+	if err != nil || askQty <= 0 {
+		return repo.PaperTrade{}, false, nil
+	}
 	priceStep := signalPriceStep(&symbol)
 	entry := roundPriceUp(signal.EntryPrice, priceStep)
 	support := roundPriceDown(signal.SupportPrice, priceStep)
@@ -177,22 +181,29 @@ func buildPaperTrade(signal repo.PalisadeSignalState, book mexc.BookTicker, symb
 	if err != nil {
 		return repo.PaperTrade{}, false, err
 	}
-	quantity := swapRoundQtyDown(signalOrderQuoteUSDT/entry, step)
+	desiredQuantity := swapRoundQtyDown(signalOrderQuoteUSDT/entry, step)
+	quantity := swapRoundQtyDown(paperFillQuantity(desiredQuantity, askQty), step)
 	if quantity <= 0 || !isValidPaperOrder(symbol, order.BUY, entry, quantity) {
 		return repo.PaperTrade{}, false, nil
 	}
+	fee := math.Max(parseDecimal(symbol.MakerCommission), parseDecimal(symbol.TakerCommission))
+	opened := now
 	return repo.PaperTrade{
 		StrategyVersion:   paperStrategyVersion,
 		Symbol:            signal.Symbol,
 		SignalAt:          paperSignalAt(signal),
-		Status:            "BUY_PENDING",
-		EntryMode:         "REBOUND_2CANDLE_V5",
+		Status:            "POSITION_OPEN",
+		EntryMode:         "REBOUND_2CANDLE_TAKER_V6",
 		SupportPrice:      support,
 		EntryPrice:        entry,
 		TargetPrice:       roundPriceDown(signal.TargetPrice, signalPriceStep(&symbol)),
 		MinExitPrice:      roundPriceDown(signal.MinExitPrice, signalPriceStep(&symbol)),
 		ExpectedNetProfit: signal.NetProfit,
 		Quantity:          quantity,
+		FilledQuantity:    quantity,
+		BuyQuote:          ask * quantity,
+		Fees:              ask * quantity * fee,
+		OpenedAt:          &opened,
 		LastPrice:         (bid + ask) / 2,
 		UpdatedAt:         now,
 	}, true, nil

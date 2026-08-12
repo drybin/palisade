@@ -62,25 +62,28 @@ func TestPaperFillQuantity_doesNotExceedRemaining(t *testing.T) {
 	}
 }
 
-func TestBuildPaperTrade_v5KeepsSupportAndAskEntry(t *testing.T) {
+func TestBuildPaperTrade_v6FillsImmediatelyAtAsk(t *testing.T) {
 	trade, ok, err := buildPaperTrade(
 		repo.PalisadeSignalState{
 			Symbol: "TESTUSDT", SupportPrice: 100, EntryPrice: 100.1,
 			TargetPrice: 102, MinExitPrice: 101, NetProfit: 0.01,
 		},
-		mexc.BookTicker{Symbol: "TESTUSDT", BidPrice: "100", AskPrice: "100.1"},
+		mexc.BookTicker{Symbol: "TESTUSDT", BidPrice: "100", AskPrice: "100.1", AskQty: "0.050"},
 		mexc.SymbolDetail{
 			Symbol: "TESTUSDT", Status: "1", IsSpotTradingAllowed: true,
 			OrderTypes: []string{"LIMIT"}, QuotePrecision: 2, QuoteAmountPrecision: "1",
-			BaseSizePrecision: "0.001", Filters: []mexc.SymbolFilter{{FilterType: "LOT_SIZE", StepSize: "0.001", MinQty: "0.001"}},
+			BaseSizePrecision: "0.001", TakerCommission: "0.001", Filters: []mexc.SymbolFilter{{FilterType: "LOT_SIZE", StepSize: "0.001", MinQty: "0.001"}},
 		},
 		time.Now().UTC(),
 	)
 	if err != nil || !ok {
-		t.Fatalf("expected valid v5 paper trade, ok=%v err=%v", ok, err)
+		t.Fatalf("expected valid v6 paper trade, ok=%v err=%v", ok, err)
 	}
-	if trade.EntryMode != "REBOUND_2CANDLE_V5" || math.Abs(trade.SupportPrice-100) > 1e-12 || math.Abs(trade.EntryPrice-100.1) > 1e-12 {
-		t.Fatalf("unexpected v5 levels: mode=%s support=%.4f entry=%.4f", trade.EntryMode, trade.SupportPrice, trade.EntryPrice)
+	if trade.EntryMode != "REBOUND_2CANDLE_TAKER_V6" || trade.Status != "POSITION_OPEN" || math.Abs(trade.SupportPrice-100) > 1e-12 || math.Abs(trade.EntryPrice-100.1) > 1e-12 {
+		t.Fatalf("unexpected v6 levels: mode=%s status=%s support=%.4f entry=%.4f", trade.EntryMode, trade.Status, trade.SupportPrice, trade.EntryPrice)
+	}
+	if math.Abs(trade.Quantity-0.05) > 1e-12 || trade.FilledQuantity != trade.Quantity || math.Abs(trade.BuyQuote-5.005) > 1e-12 {
+		t.Fatalf("expected immediate partial fill, quantity=%.8f filled=%.8f quote=%.8f", trade.Quantity, trade.FilledQuantity, trade.BuyQuote)
 	}
 	if math.Abs(trade.ExpectedNetProfit-0.01) > 1e-12 {
 		t.Fatalf("expected net profit 0.01, got %.8f", trade.ExpectedNetProfit)
