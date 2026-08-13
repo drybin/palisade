@@ -54,13 +54,29 @@ func TestBuildPalisadeSignal_requiresStableRangeAndNetProfit(t *testing.T) {
 		t.Fatalf("expected net profit >= %.4f, got %.4f", minSignalNetProfit, signal.netProfit)
 	}
 	if signal.current != snapshot.AskPrice {
-		t.Fatalf("expected entry at current ask %.4f, got %.4f", snapshot.AskPrice, signal.current)
+		t.Fatalf("expected current ask %.4f, got %.4f", snapshot.AskPrice, signal.current)
 	}
-	if signal.support >= signal.current {
-		t.Fatalf("expected rebound entry above support, support=%.4f entry=%.4f", signal.support, signal.current)
+	if signal.support >= signal.entry || signal.entry >= signal.current {
+		t.Fatalf("expected pullback entry between support and current price, support=%.4f entry=%.4f current=%.4f", signal.support, signal.entry, signal.current)
 	}
 	if signal.touchesSupport < 2 || signal.touchesResistance < 2 {
 		t.Fatalf("expected repeated touches, got support=%d resistance=%d", signal.touchesSupport, signal.touchesResistance)
+	}
+}
+
+func TestIsBTCMarketSafe_rejectsSharpThirtyMinuteDecline(t *testing.T) {
+	now := time.Now().UTC()
+	klines := mexc.Klines{
+		{Close: 100, CloseTime: now.Add(-31 * time.Minute).UnixMilli()},
+		{Close: 99.8, CloseTime: now.Add(-16 * time.Minute).UnixMilli()},
+		{Close: 99.4, CloseTime: now.Add(-time.Minute).UnixMilli()},
+	}
+	if isBTCMarketSafe(klines, now) {
+		t.Fatal("expected a 0.6% BTC decline to block new signals")
+	}
+	klines[2].Close = 99.6
+	if !isBTCMarketSafe(klines, now) {
+		t.Fatal("expected a 0.4% BTC decline to allow new signals")
 	}
 }
 

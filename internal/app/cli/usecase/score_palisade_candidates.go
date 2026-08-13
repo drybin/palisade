@@ -23,7 +23,9 @@ const (
 	minSignalNetProfit     = 0.006
 	maxSignalEntryRange    = 0.20
 	minimumReboundPercent  = 0.001
+	signalPullbackPercent  = 0.002
 	signalTargetRangeShare = 0.40
+	maxBTCDecline30m       = 0.005
 	signalCooldown         = 60 * time.Minute
 	maxSignalCandidates    = 100
 	maxSignalsPerRun       = 3
@@ -44,10 +46,10 @@ func NewScorePalisadeCandidatesUsecase(api *webapi.MexcWebapi, stateRepo repo.IS
 }
 
 type palisadeSignal struct {
-	symbol, baseAsset                          string
-	current, support, resistance, minExitPrice float64
-	netProfit, spread, volume                  float64
-	touchesSupport, touchesResistance, score   int
+	symbol, baseAsset                                 string
+	current, entry, support, resistance, minExitPrice float64
+	netProfit, spread, volume                         float64
+	touchesSupport, touchesResistance, score          int
 }
 
 func (u *ScorePalisadeCandidates) Process(ctx context.Context, debug bool) error {
@@ -67,6 +69,14 @@ func (u *ScorePalisadeCandidates) Process(ctx context.Context, debug bool) error
 		if symbol.IsSpotTradingAllowed && symbol.QuoteAsset == "USDT" {
 			bySymbol[symbol.Symbol] = symbol
 		}
+	}
+	btcKlines, err := u.api.GetKlinesPublic(ctx, "BTCUSDT", enum.MINUTES_15, 4, nil)
+	if err != nil {
+		return wrap.Errorf("get BTC market regime: %w", err)
+	}
+	if !isBTCMarketSafe(*btcKlines, time.Now().UTC()) {
+		fmt.Println("Новые сигналы пропущены: BTC снизился более чем на 0.5% за последние 30 минут")
+		return nil
 	}
 
 	candidates := make([]palisadeSignal, 0, maxSignalCandidates)
@@ -110,7 +120,7 @@ func (u *ScorePalisadeCandidates) Process(ctx context.Context, debug bool) error
 	fmt.Printf("Snapshots загружено: %d\nСвечи запрошены для: %d пар\nОтобрано кандидатов: %d\n", len(snapshots), klinesChecked, len(candidates))
 	for i, candidate := range candidates {
 		fmt.Printf("%2d. %-16s цена=%-12s вход=%-12s цель=%-12s net=%.2f%% объём=%.0f спред=%.3f%% касания=S%d/R%d score=%d\n",
-			i+1, candidate.symbol, formatPrice(candidate.current), formatPrice(candidate.support), formatPrice(candidate.resistance),
+			i+1, candidate.symbol, formatPrice(candidate.current), formatPrice(candidate.entry), formatPrice(candidate.resistance),
 			candidate.netProfit*100, candidate.volume, candidate.spread*100, candidate.touchesSupport, candidate.touchesResistance, candidate.score)
 	}
 	sent := 0
@@ -124,7 +134,7 @@ func (u *ScorePalisadeCandidates) Process(ctx context.Context, debug bool) error
 			Symbol:          candidate.symbol,
 			StrategyVersion: paperStrategyVersion,
 			SupportPrice:    candidate.support,
-			EntryPrice:      candidate.current,
+			EntryPrice:      candidate.entry,
 			TargetPrice:     candidate.resistance,
 			MinExitPrice:    candidate.minExitPrice,
 			NetProfit:       candidate.netProfit,
@@ -232,7 +242,11 @@ func buildPalisadeSignal(snapshot repo.MarketSnapshot, symbol mexc.SymbolDetail,
 	makerFee := parseDecimal(symbol.MakerCommission)
 	takerFee := parseDecimal(symbol.TakerCommission)
 	fee := math.Max(makerFee, takerFee)
-	entry := current
+	confirmationPeak := math.Max(current, math.Max(touchCandle.High, confirmationCandle.High))
+	entry := math.Max(confirmationPeak*(1-signalPullbackPercent), support*(1+minimumReboundPercent))
+	if entry > support+rangeValue*maxSignalEntryRange {
+		return palisadeSignal{}, false
+	}
 	spread := (snapshot.AskPrice - snapshot.BidPrice) / snapshot.BidPrice
 	target, minExitPrice, ok := calculateDynamicTarget(entry, resistance, fee, spread)
 	if !ok {
@@ -244,7 +258,7 @@ func buildPalisadeSignal(snapshot repo.MarketSnapshot, symbol mexc.SymbolDetail,
 	}
 	score := int(netProfit*10000) + supportTouches*10 + resistanceTouches*10 - int(math.Abs((last-first)/first)*1000)
 	return palisadeSignal{
-		symbol: symbol.Symbol, baseAsset: symbol.BaseAsset, current: current, support: support,
+		symbol: symbol.Symbol, baseAsset: symbol.BaseAsset, current: current, entry: entry, support: support,
 		resistance: target, minExitPrice: minExitPrice, netProfit: netProfit, spread: spread,
 		volume: snapshot.QuoteVolume24h, touchesSupport: supportTouches, touchesResistance: resistanceTouches, score: score,
 	}, true
@@ -255,7 +269,7 @@ func isExecutablePalisadeSignal(signal palisadeSignal, symbol mexc.SymbolDetail)
 	if err != nil {
 		return false
 	}
-	entry := roundPriceUp(signal.current, signalPriceStep(&symbol))
+	entry := roundPriceDown(signal.entry, signalPriceStep(&symbol))
 	quantity := swapRoundQtyDown(defaultSignalOrderUSDT/entry, step)
 	return quantity > 0 && isValidPaperOrder(symbol, order.BUY, entry, quantity)
 }
@@ -267,6 +281,21 @@ func calculateDynamicTarget(entry, resistance, fee, spread float64) (target, min
 	target = entry + (resistance-entry)*signalTargetRangeShare
 	minExitPrice = entry * (1 + 2*fee + 0.001 + spread + minSignalNetProfit)
 	return target, minExitPrice, target >= minExitPrice
+}
+
+func isBTCMarketSafe(klines mexc.Klines, now time.Time) bool {
+	closed := make(mexc.Klines, 0, len(klines))
+	for _, kline := range klines {
+		if kline.Close > 0 && kline.CloseTime > 0 && time.UnixMilli(kline.CloseTime).UTC().Before(now) {
+			closed = append(closed, kline)
+		}
+	}
+	if len(closed) < 3 {
+		return false
+	}
+	start := closed[len(closed)-3].Close
+	end := closed[len(closed)-1].Close
+	return start > 0 && end/start-1 >= -maxBTCDecline30m
 }
 
 func percentileValue(values []float64, percentile float64) float64 {
@@ -293,14 +322,14 @@ func parseDecimal(value string) float64 {
 
 func formatPalisadeSignal(signal palisadeSignal, now time.Time) string {
 	return fmt.Sprintf(
-		"<b>📊 Палисада-кандидат v6</b> %s (%s)\n"+
+		"<b>📊 Палисада-кандидат v7</b> %s (%s)\n"+
 			"Цена: %s\nВход: %s | Цель: %s\n"+
 			"Net-прибыль: %.2f%%\nКасания: S=%d, R=%d\n"+
 			"Расчётный объём: %.2f USDT\n"+
 			"24h оборот: %.0f USDT | Спред: %.3f%%\n"+
 			"Score: %d\nАктуально до: %s\n"+
 			"<i>Dry-run: ордера не размещаются</i>",
-		signal.symbol, signal.baseAsset, formatPrice(signal.current), formatPrice(signal.support), formatPrice(signal.resistance),
+		signal.symbol, signal.baseAsset, formatPrice(signal.current), formatPrice(signal.entry), formatPrice(signal.resistance),
 		signal.netProfit*100, signal.touchesSupport, signal.touchesResistance, defaultSignalOrderUSDT, signal.volume, signal.spread*100,
 		signal.score, now.Add(30*time.Minute).Format("2006-01-02 15:04:05 MST"),
 	)
