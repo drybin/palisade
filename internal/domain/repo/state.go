@@ -63,32 +63,34 @@ type OrderIntent struct {
 }
 
 type PaperTrade struct {
-	ID                int
-	StrategyVersion   int
-	Symbol            string
-	SignalAt          time.Time
-	Status            string
-	EntryMode         string
-	SupportPrice      float64
-	EntryPrice        float64
-	TargetPrice       float64
-	MinExitPrice      float64
-	ExpectedNetProfit float64
-	BreakEvenArmed    bool
-	MaxBidPrice       float64
-	MinBidPrice       float64
-	Quantity          float64
-	FilledQuantity    float64
-	SoldQuantity      float64
-	BuyQuote          float64
-	SellQuote         float64
-	Fees              float64
-	PnL               float64
-	OpenedAt          *time.Time
-	ClosedAt          *time.Time
-	ExitReason        string
-	LastPrice         float64
-	UpdatedAt         time.Time
+	ID                 int
+	StrategyVersion    int
+	Symbol             string
+	SignalAt           time.Time
+	Status             string
+	EntryMode          string
+	SupportPrice       float64
+	EntryPrice         float64
+	TargetPrice        float64
+	MinExitPrice       float64
+	ExpectedNetProfit  float64
+	BreakEvenArmed     bool
+	MaxBidPrice        float64
+	MinBidPrice        float64
+	EntryLowPrice      float64
+	PartialProfitTaken bool
+	Quantity           float64
+	FilledQuantity     float64
+	SoldQuantity       float64
+	BuyQuote           float64
+	SellQuote          float64
+	Fees               float64
+	PnL                float64
+	OpenedAt           *time.Time
+	ClosedAt           *time.Time
+	ExitReason         string
+	LastPrice          float64
+	UpdatedAt          time.Time
 }
 
 type PaperTradeStats struct {

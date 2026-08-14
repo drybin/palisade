@@ -62,7 +62,7 @@ func TestPaperFillQuantity_doesNotExceedRemaining(t *testing.T) {
 	}
 }
 
-func TestBuildPaperTrade_v7WaitsForPullback(t *testing.T) {
+func TestBuildPaperTrade_v8WaitsForPullback(t *testing.T) {
 	trade, ok, err := buildPaperTrade(
 		repo.PalisadeSignalState{
 			Symbol: "TESTUSDT", SupportPrice: 100, EntryPrice: 100.1,
@@ -77,10 +77,10 @@ func TestBuildPaperTrade_v7WaitsForPullback(t *testing.T) {
 		time.Now().UTC(),
 	)
 	if err != nil || !ok {
-		t.Fatalf("expected valid v7 paper trade, ok=%v err=%v", ok, err)
+		t.Fatalf("expected valid v8 paper trade, ok=%v err=%v", ok, err)
 	}
-	if trade.EntryMode != "REBOUND_PULLBACK_TRAILING_V7" || trade.Status != "BUY_PENDING" || math.Abs(trade.SupportPrice-100) > 1e-12 || math.Abs(trade.EntryPrice-100.1) > 1e-12 {
-		t.Fatalf("unexpected v7 levels: mode=%s status=%s support=%.4f entry=%.4f", trade.EntryMode, trade.Status, trade.SupportPrice, trade.EntryPrice)
+	if trade.EntryMode != "PULLBACK_RECLAIM_PARTIAL_V8" || trade.Status != "BUY_PENDING" || math.Abs(trade.SupportPrice-100) > 1e-12 || math.Abs(trade.EntryPrice-100.1) > 1e-12 {
+		t.Fatalf("unexpected v8 levels: mode=%s status=%s support=%.4f entry=%.4f", trade.EntryMode, trade.Status, trade.SupportPrice, trade.EntryPrice)
 	}
 	if math.Abs(trade.Quantity-0.099) > 1e-12 || trade.FilledQuantity != 0 || trade.BuyQuote != 0 || trade.OpenedAt != nil {
 		t.Fatalf("expected pending pullback entry, quantity=%.8f filled=%.8f quote=%.8f", trade.Quantity, trade.FilledQuantity, trade.BuyQuote)
@@ -107,10 +107,11 @@ func TestPaperTrailingStopLocksPositiveNetProfit(t *testing.T) {
 	}
 }
 
-func TestPaperEntryCancelReason_v7DistinguishesInvalidation(t *testing.T) {
+func TestPaperEntryCancelReason_v8DistinguishesInvalidation(t *testing.T) {
 	now := time.Now().UTC()
 	trade := repo.PaperTrade{
 		StrategyVersion: paperStrategyVersion,
+		Status:          "BUY_PENDING",
 		SignalAt:        now,
 		SupportPrice:    100,
 		EntryPrice:      100.2,
@@ -126,19 +127,66 @@ func TestPaperEntryCancelReason_v7DistinguishesInvalidation(t *testing.T) {
 	}
 }
 
-func TestUpdatePaperTarget_v7NeverLowersTarget(t *testing.T) {
-	trade := repo.PaperTrade{StrategyVersion: paperStrategyVersion, TargetPrice: 101}
-	updatePaperTarget(&trade, 100.5, 0.01)
-	if trade.TargetPrice != 101 {
-		t.Fatalf("expected v7 target to stay at 101, got %.4f", trade.TargetPrice)
+func TestPaperEntryCancelReason_v8RejectsDeepPullback(t *testing.T) {
+	now := time.Now().UTC()
+	trade := repo.PaperTrade{
+		StrategyVersion: paperStrategyVersion,
+		Status:          "PULLBACK_SEEN",
+		SignalAt:        now,
+		SupportPrice:    90,
+		EntryPrice:      100,
 	}
-	updatePaperTarget(&trade, 101.5, 0.01)
-	if trade.TargetPrice != 101.5 {
-		t.Fatalf("expected v7 target to rise to 101.5, got %.4f", trade.TargetPrice)
+	if got := paperEntryCancelReason(trade, now, 99.7); got != "" {
+		t.Fatalf("expected shallow pullback to remain active, got %q", got)
+	}
+	if got := paperEntryCancelReason(trade, now, 99.5); got != "PULLBACK_TOO_DEEP" {
+		t.Fatalf("expected deep pullback rejection, got %q", got)
 	}
 }
 
-func TestPaperExitReason_separatesV7TrailingFromLegacyBreakEven(t *testing.T) {
+func TestPaperReboundConfirmed_requiresRecoveryFromObservedLow(t *testing.T) {
+	trade := repo.PaperTrade{EntryLowPrice: 100}
+	if paperReboundConfirmed(&trade, 99.8) {
+		t.Fatal("expected a new low not to confirm entry")
+	}
+	if paperReboundConfirmed(&trade, 99.9) {
+		t.Fatal("expected recovery below threshold not to confirm entry")
+	}
+	if !paperReboundConfirmed(&trade, 99.95) {
+		t.Fatal("expected 0.15% recovery from the low to confirm entry")
+	}
+}
+
+func TestPaperQuickProfitPriceCoversFees(t *testing.T) {
+	fee := 0.001
+	buyPrice := 100.0
+	sellPrice := paperQuickProfitBidPrice(buyPrice, fee)
+	net := sellPrice*(1-fee)/(buyPrice*(1+fee)) - 1
+	if math.Abs(net-paperQuickProfitNet) > 1e-12 {
+		t.Fatalf("expected %.6f net profit, got %.6f", paperQuickProfitNet, net)
+	}
+}
+
+func TestPaperPartialProfitQuantityRoundsDownToLotStep(t *testing.T) {
+	symbol := mexc.SymbolDetail{Filters: []mexc.SymbolFilter{{FilterType: "LOT_SIZE", StepSize: "0.1"}}}
+	if got := paperPartialProfitQuantity(1.1, symbol); math.Abs(got-0.5) > 1e-12 {
+		t.Fatalf("expected partial quantity 0.5, got %.8f", got)
+	}
+}
+
+func TestUpdatePaperTarget_currentStrategyNeverLowersTarget(t *testing.T) {
+	trade := repo.PaperTrade{StrategyVersion: paperStrategyVersion, TargetPrice: 101}
+	updatePaperTarget(&trade, 100.5, 0.01)
+	if trade.TargetPrice != 101 {
+		t.Fatalf("expected target to stay at 101, got %.4f", trade.TargetPrice)
+	}
+	updatePaperTarget(&trade, 101.5, 0.01)
+	if trade.TargetPrice != 101.5 {
+		t.Fatalf("expected target to rise to 101.5, got %.4f", trade.TargetPrice)
+	}
+}
+
+func TestPaperExitReason_separatesTrailingFromLegacyBreakEven(t *testing.T) {
 	fee := 0.001
 	buyPrice := 100.0
 	breakEvenBid := paperBreakEvenBidPrice(buyPrice, fee)
@@ -146,7 +194,7 @@ func TestPaperExitReason_separatesV7TrailingFromLegacyBreakEven(t *testing.T) {
 
 	currentTrade := repo.PaperTrade{StrategyVersion: paperStrategyVersion, BreakEvenArmed: true}
 	if got := paperExitReason(currentTrade, now, breakEvenBid, 90, buyPrice, fee); got != "TRAILING_STOP" {
-		t.Fatalf("expected v7 trailing stop, got %q", got)
+		t.Fatalf("expected trailing stop, got %q", got)
 	}
 	if trigger := paperBreakEvenTrigger(buyPrice, 101, fee); trigger <= breakEvenBid {
 		t.Fatalf("expected trigger %.8f above break-even %.8f", trigger, breakEvenBid)

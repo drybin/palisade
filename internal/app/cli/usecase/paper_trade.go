@@ -16,9 +16,13 @@ import (
 
 const (
 	paperLockKey             = "palisade:paper-trading"
-	paperStrategyVersion     = 7
+	paperStrategyVersion     = 8
 	maxPaperOpenTrades       = 1
-	paperTrailingTrigger     = 0.004
+	paperReboundEntryPercent = 0.0015
+	paperMaxPullbackDepth    = 0.004
+	paperQuickProfitNet      = 0.002
+	paperQuickProfitShare    = 0.5
+	paperTrailingTrigger     = 0.006
 	paperTrailingDistance    = 0.0025
 	paperMinimumLockedProfit = 0.00025
 	paperEntryRunawayPercent = 0.004
@@ -97,7 +101,7 @@ func (u *PaperTradeRunner) Process(ctx context.Context, debug bool) error {
 			openSlotsUsed++
 		}
 		if debug {
-			fmt.Printf("paper %s: status=%s mode=%s support=%.8f break_even=%t max_bid=%.8f min_bid=%.8f filled=%.8f sold=%.8f mark_pnl=%.8f\n", trade.Symbol, trade.Status, trade.EntryMode, trade.SupportPrice, trade.BreakEvenArmed, trade.MaxBidPrice, trade.MinBidPrice, trade.FilledQuantity, trade.SoldQuantity, trade.PnL)
+			fmt.Printf("paper %s: status=%s mode=%s support=%.8f entry_low=%.8f trailing=%t partial=%t max_bid=%.8f min_bid=%.8f filled=%.8f sold=%.8f mark_pnl=%.8f\n", trade.Symbol, trade.Status, trade.EntryMode, trade.SupportPrice, trade.EntryLowPrice, trade.BreakEvenArmed, trade.PartialProfitTaken, trade.MaxBidPrice, trade.MinBidPrice, trade.FilledQuantity, trade.SoldQuantity, trade.PnL)
 		}
 	}
 
@@ -163,7 +167,7 @@ func (u *PaperTradeRunner) Process(ctx context.Context, debug bool) error {
 }
 
 func isOpenPaperTrade(trade repo.PaperTrade) bool {
-	return trade.Status == "BUY_PENDING" || trade.Status == "POSITION_OPEN" || trade.Status == "SELL_PENDING"
+	return trade.Status == "BUY_PENDING" || trade.Status == "PULLBACK_SEEN" || trade.Status == "POSITION_OPEN" || trade.Status == "SELL_PENDING"
 }
 
 func buildPaperTrade(signal repo.PalisadeSignalState, book mexc.BookTicker, symbol mexc.SymbolDetail, now time.Time) (repo.PaperTrade, bool, error) {
@@ -190,7 +194,7 @@ func buildPaperTrade(signal repo.PalisadeSignalState, book mexc.BookTicker, symb
 		Symbol:            signal.Symbol,
 		SignalAt:          paperSignalAt(signal),
 		Status:            "BUY_PENDING",
-		EntryMode:         "REBOUND_PULLBACK_TRAILING_V7",
+		EntryMode:         "PULLBACK_RECLAIM_PARTIAL_V8",
 		SupportPrice:      support,
 		EntryPrice:        entry,
 		TargetPrice:       roundPriceDown(signal.TargetPrice, signalPriceStep(&symbol)),
@@ -230,6 +234,11 @@ func (u *PaperTradeRunner) processPaperTrade(ctx context.Context, trade *repo.Pa
 			trade.Status = "POSITION_OPEN"
 		}
 		if trade.Status == "BUY_PENDING" && ask <= trade.EntryPrice {
+			if trade.StrategyVersion >= 8 {
+				trade.Status = "PULLBACK_SEEN"
+				trade.EntryLowPrice = bid
+				return u.persistPaperTrade(ctx, trade, now, bid, fee)
+			}
 			remaining := trade.Quantity - trade.FilledQuantity
 			step, stepErr := swapLotStep(&symbol)
 			if stepErr != nil {
@@ -241,6 +250,40 @@ func (u *PaperTradeRunner) processPaperTrade(ctx context.Context, trade *repo.Pa
 				trade.FilledQuantity += fillQty
 				trade.BuyQuote += fillPrice * fillQty
 				trade.Fees += fillPrice * fillQty * fee
+				opened := now
+				trade.OpenedAt = &opened
+				trade.Status = "POSITION_OPEN"
+			}
+		}
+	}
+
+	if trade.Status == "PULLBACK_SEEN" {
+		entryCancelReason := paperEntryCancelReason(*trade, now, bid)
+		if entryCancelReason != "" {
+			trade.Status = "CANCELED"
+			trade.ExitReason = entryCancelReason
+			return u.persistPaperTrade(ctx, trade, now, bid, fee)
+		}
+		if paperReboundConfirmed(trade, bid) {
+			step, stepErr := swapLotStep(&symbol)
+			if stepErr != nil {
+				return stepErr
+			}
+			quantityAtAsk := swapRoundQtyDown(signalOrderQuoteUSDT/ask, step)
+			remaining := math.Min(trade.Quantity, quantityAtAsk) - trade.FilledQuantity
+			fillQty := swapRoundQtyDown(paperFillQuantity(remaining, askQty), step)
+			if fillQty > 0 {
+				fillPrice := ask
+				if !isValidPaperOrder(symbol, order.BUY, fillPrice, fillQty) {
+					trade.Status = "CANCELED"
+					trade.ExitReason = "REBOUND_ORDER_INVALID"
+					return u.persistPaperTrade(ctx, trade, now, bid, fee)
+				}
+				trade.FilledQuantity += fillQty
+				trade.BuyQuote += fillPrice * fillQty
+				trade.Fees += fillPrice * fillQty * fee
+				trade.MaxBidPrice = bid
+				trade.MinBidPrice = bid
 				opened := now
 				trade.OpenedAt = &opened
 				trade.Status = "POSITION_OPEN"
@@ -262,22 +305,40 @@ func (u *PaperTradeRunner) processPaperTrade(ctx context.Context, trade *repo.Pa
 		if support <= 0 {
 			support = trade.EntryPrice
 		}
-		if trade.StrategyVersion >= 7 && !trade.BreakEvenArmed && bid >= paperTrailingActivationPrice(buyPrice, fee) {
+		if trade.StrategyVersion >= 8 && !trade.BreakEvenArmed && bid >= paperTrailingActivationPrice(buyPrice, fee) {
+			trade.BreakEvenArmed = true
+		} else if trade.StrategyVersion == 7 && !trade.BreakEvenArmed && bid >= paperV7TrailingActivationPrice(buyPrice, fee) {
 			trade.BreakEvenArmed = true
 		} else if trade.StrategyVersion >= 4 && trade.StrategyVersion < 7 && !trade.BreakEvenArmed && bid >= paperBreakEvenTrigger(buyPrice, trade.TargetPrice, fee) {
 			trade.BreakEvenArmed = true
 		}
 		reason := paperExitReason(*trade, now, bid, support, buyPrice, fee)
+		if reason == "" && trade.Status == "SELL_PENDING" && trade.ExitReason != "" {
+			reason = trade.ExitReason
+		}
+		partialTarget := paperPartialProfitQuantity(trade.FilledQuantity, symbol)
+		partialPending := trade.StrategyVersion >= 8 && !trade.PartialProfitTaken && trade.SoldQuantity < partialTarget-1e-12 &&
+			bid >= paperQuickProfitBidPrice(buyPrice, fee)
+		if reason == "" && partialPending && bid >= paperQuickProfitBidPrice(buyPrice, fee) {
+			reason = "PARTIAL_PROFIT"
+		}
 		shouldSell := reason != "" || bid >= trade.TargetPrice
 		if shouldSell {
 			if reason == "" {
 				reason = "TARGET_REACHED"
 			}
 			remaining := trade.FilledQuantity - trade.SoldQuantity
-			fillQty := paperFillQuantity(remaining, bidQty)
+			if reason == "PARTIAL_PROFIT" {
+				remaining = partialTarget - trade.SoldQuantity
+			}
+			step, stepErr := swapLotStep(&symbol)
+			if stepErr != nil {
+				return stepErr
+			}
+			fillQty := swapRoundQtyDown(paperFillQuantity(remaining, bidQty), step)
 			if fillQty > 0 {
 				fillPrice := bid
-				if reason != "TARGET_REACHED" {
+				if reason != "TARGET_REACHED" && reason != "PARTIAL_PROFIT" {
 					fillPrice = bid * (1 - emergencyPriceDiscount)
 				}
 				trade.SoldQuantity += fillQty
@@ -285,6 +346,12 @@ func (u *PaperTradeRunner) processPaperTrade(ctx context.Context, trade *repo.Pa
 				trade.Fees += fillPrice * fillQty * fee
 				trade.ExitReason = reason
 				trade.Status = "SELL_PENDING"
+				if reason == "PARTIAL_PROFIT" {
+					trade.Status = "POSITION_OPEN"
+					if trade.SoldQuantity >= partialTarget-1e-12 {
+						trade.PartialProfitTaken = true
+					}
+				}
 			}
 		}
 		if trade.SoldQuantity >= trade.FilledQuantity-1e-12 {
@@ -295,6 +362,17 @@ func (u *PaperTradeRunner) processPaperTrade(ctx context.Context, trade *repo.Pa
 		}
 	}
 	return u.persistPaperTrade(ctx, trade, now, bid, fee)
+}
+
+func paperReboundConfirmed(trade *repo.PaperTrade, bid float64) bool {
+	if bid <= 0 {
+		return false
+	}
+	if trade.EntryLowPrice <= 0 || bid < trade.EntryLowPrice {
+		trade.EntryLowPrice = bid
+		return false
+	}
+	return bid >= trade.EntryLowPrice*(1+paperReboundEntryPercent)
 }
 
 func updatePaperTarget(trade *repo.PaperTrade, target, priceStep float64) {
@@ -317,7 +395,10 @@ func paperEntryCancelReason(trade repo.PaperTrade, now time.Time, bid float64) s
 	if now.Sub(trade.SignalAt) > paperPullbackTimeout {
 		return "PULLBACK_TIMEOUT"
 	}
-	if bid > trade.EntryPrice*(1+paperEntryRunawayPercent) {
+	if trade.StrategyVersion >= 8 && trade.Status == "PULLBACK_SEEN" && bid < trade.EntryPrice*(1-paperMaxPullbackDepth) {
+		return "PULLBACK_TOO_DEEP"
+	}
+	if trade.Status == "BUY_PENDING" && bid > trade.EntryPrice*(1+paperEntryRunawayPercent) {
 		return "ENTRY_RAN_AWAY"
 	}
 	return ""
@@ -352,6 +433,25 @@ func paperBreakEvenTrigger(buyPrice, targetPrice, fee float64) float64 {
 
 func paperTrailingActivationPrice(buyPrice, fee float64) float64 {
 	return math.Max(buyPrice*(1+paperTrailingTrigger), paperPositiveStopBidPrice(buyPrice, fee))
+}
+
+func paperV7TrailingActivationPrice(buyPrice, fee float64) float64 {
+	return math.Max(buyPrice*1.004, paperPositiveStopBidPrice(buyPrice, fee))
+}
+
+func paperQuickProfitBidPrice(buyPrice, fee float64) float64 {
+	if buyPrice <= 0 || fee < 0 || fee >= 1 {
+		return math.Inf(1)
+	}
+	return buyPrice * (1 + fee) * (1 + paperQuickProfitNet) / (1 - fee)
+}
+
+func paperPartialProfitQuantity(filledQuantity float64, symbol mexc.SymbolDetail) float64 {
+	step, err := swapLotStep(&symbol)
+	if err != nil {
+		return 0
+	}
+	return swapRoundQtyDown(filledQuantity*paperQuickProfitShare, step)
 }
 
 func paperTrailingStopPrice(trade repo.PaperTrade, buyPrice, fee float64) float64 {

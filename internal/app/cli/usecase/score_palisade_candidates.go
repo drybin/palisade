@@ -322,7 +322,7 @@ func parseDecimal(value string) float64 {
 
 func formatPalisadeSignal(signal palisadeSignal, now time.Time) string {
 	return fmt.Sprintf(
-		"<b>📊 Палисада-кандидат v7</b> %s (%s)\n"+
+		"<b>📊 Палисада-кандидат v8</b> %s (%s)\n"+
 			"Цена: %s\nВход: %s | Цель: %s\n"+
 			"Net-прибыль: %.2f%%\nКасания: S=%d, R=%d\n"+
 			"Расчётный объём: %.2f USDT\n"+

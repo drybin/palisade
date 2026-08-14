@@ -382,7 +382,7 @@ ORDER BY id;
 SELECT * FROM paper_trade
 WHERE symbol = $1
   AND strategy_version = $2
-  AND status IN ('BUY_PENDING', 'POSITION_OPEN', 'SELL_PENDING')
+  AND status IN ('BUY_PENDING', 'PULLBACK_SEEN', 'POSITION_OPEN', 'SELL_PENDING')
 ORDER BY id DESC
 LIMIT 1;
 
@@ -396,15 +396,15 @@ LIMIT 1;
 
 -- name: CreatePaperTrade :one
 INSERT INTO paper_trade (
-    strategy_version, symbol, signal_at, status, entry_mode, support_price, entry_price, target_price, min_exit_price, expected_net_profit, break_even_armed, max_bid_price, min_bid_price, quantity,
+    strategy_version, symbol, signal_at, status, entry_mode, support_price, entry_price, target_price, min_exit_price, expected_net_profit, break_even_armed, max_bid_price, min_bid_price, entry_low_price, partial_profit_taken, quantity,
     filled_quantity, sold_quantity, buy_quote, sell_quote, fees, pnl, opened_at,
     closed_at, exit_reason, last_price, updated_at
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25)
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27)
 RETURNING *;
 
 -- name: ListOpenPaperTrades :many
 SELECT * FROM paper_trade
-WHERE status IN ('BUY_PENDING', 'POSITION_OPEN', 'SELL_PENDING')
+WHERE status IN ('BUY_PENDING', 'PULLBACK_SEEN', 'POSITION_OPEN', 'SELL_PENDING')
   AND strategy_version = $1
 ORDER BY id;
 
@@ -415,17 +415,19 @@ UPDATE paper_trade SET
     break_even_armed = $4,
     max_bid_price = $5,
     min_bid_price = $6,
-    filled_quantity = $7,
-    sold_quantity = $8,
-    buy_quote = $9,
-    sell_quote = $10,
-    fees = $11,
-    pnl = $12,
-    opened_at = $13,
-    closed_at = $14,
-    exit_reason = $15,
-    last_price = $16,
-    updated_at = $17
+    entry_low_price = $7,
+    partial_profit_taken = $8,
+    filled_quantity = $9,
+    sold_quantity = $10,
+    buy_quote = $11,
+    sell_quote = $12,
+    fees = $13,
+    pnl = $14,
+    opened_at = $15,
+    closed_at = $16,
+    exit_reason = $17,
+    last_price = $18,
+    updated_at = $19
 WHERE id = $1;
 
 -- name: GetPaperTradeStats :one
@@ -433,7 +435,7 @@ SELECT
     COUNT(*)::int AS total,
     COUNT(*) FILTER (WHERE status = 'CLOSED')::int AS closed,
     COUNT(*) FILTER (WHERE status = 'CANCELED')::int AS canceled,
-    COUNT(*) FILTER (WHERE status IN ('BUY_PENDING', 'POSITION_OPEN', 'SELL_PENDING'))::int AS open,
+    COUNT(*) FILTER (WHERE status IN ('BUY_PENDING', 'PULLBACK_SEEN', 'POSITION_OPEN', 'SELL_PENDING'))::int AS open,
     COALESCE(SUM(pnl) FILTER (WHERE status = 'CLOSED'), 0)::double precision AS total_pnl,
     COALESCE(SUM(pnl) FILTER (WHERE status IN ('POSITION_OPEN', 'SELL_PENDING')), 0)::double precision AS open_pnl,
     COALESCE(AVG(pnl) FILTER (WHERE status = 'CLOSED'), 0)::double precision AS average_pnl,

@@ -92,39 +92,41 @@ func (q *Queries) CreateOrderIntent(ctx context.Context, arg CreateOrderIntentPa
 
 const createPaperTrade = `-- name: CreatePaperTrade :one
 INSERT INTO paper_trade (
-    strategy_version, symbol, signal_at, status, entry_mode, support_price, entry_price, target_price, min_exit_price, expected_net_profit, break_even_armed, max_bid_price, min_bid_price, quantity,
+    strategy_version, symbol, signal_at, status, entry_mode, support_price, entry_price, target_price, min_exit_price, expected_net_profit, break_even_armed, max_bid_price, min_bid_price, entry_low_price, partial_profit_taken, quantity,
     filled_quantity, sold_quantity, buy_quote, sell_quote, fees, pnl, opened_at,
     closed_at, exit_reason, last_price, updated_at
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25)
-RETURNING id, strategy_version, symbol, signal_at, status, entry_mode, support_price, entry_price, target_price, min_exit_price, expected_net_profit, break_even_armed, max_bid_price, min_bid_price, quantity, filled_quantity, sold_quantity, buy_quote, sell_quote, fees, pnl, opened_at, closed_at, exit_reason, last_price, updated_at
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27)
+RETURNING id, strategy_version, symbol, signal_at, status, entry_mode, support_price, entry_price, target_price, min_exit_price, expected_net_profit, break_even_armed, max_bid_price, min_bid_price, entry_low_price, partial_profit_taken, quantity, filled_quantity, sold_quantity, buy_quote, sell_quote, fees, pnl, opened_at, closed_at, exit_reason, last_price, updated_at
 `
 
 type CreatePaperTradeParams struct {
-	StrategyVersion   int
-	Symbol            string
-	SignalAt          time.Time
-	Status            string
-	EntryMode         string
-	SupportPrice      float64
-	EntryPrice        float64
-	TargetPrice       float64
-	MinExitPrice      float64
-	ExpectedNetProfit float64
-	BreakEvenArmed    bool
-	MaxBidPrice       float64
-	MinBidPrice       float64
-	Quantity          float64
-	FilledQuantity    float64
-	SoldQuantity      float64
-	BuyQuote          float64
-	SellQuote         float64
-	Fees              float64
-	Pnl               float64
-	OpenedAt          *time.Time
-	ClosedAt          *time.Time
-	ExitReason        string
-	LastPrice         float64
-	UpdatedAt         time.Time
+	StrategyVersion    int
+	Symbol             string
+	SignalAt           time.Time
+	Status             string
+	EntryMode          string
+	SupportPrice       float64
+	EntryPrice         float64
+	TargetPrice        float64
+	MinExitPrice       float64
+	ExpectedNetProfit  float64
+	BreakEvenArmed     bool
+	MaxBidPrice        float64
+	MinBidPrice        float64
+	EntryLowPrice      float64
+	PartialProfitTaken bool
+	Quantity           float64
+	FilledQuantity     float64
+	SoldQuantity       float64
+	BuyQuote           float64
+	SellQuote          float64
+	Fees               float64
+	Pnl                float64
+	OpenedAt           *time.Time
+	ClosedAt           *time.Time
+	ExitReason         string
+	LastPrice          float64
+	UpdatedAt          time.Time
 }
 
 func (q *Queries) CreatePaperTrade(ctx context.Context, arg CreatePaperTradeParams) (PaperTrade, error) {
@@ -142,6 +144,8 @@ func (q *Queries) CreatePaperTrade(ctx context.Context, arg CreatePaperTradePara
 		arg.BreakEvenArmed,
 		arg.MaxBidPrice,
 		arg.MinBidPrice,
+		arg.EntryLowPrice,
+		arg.PartialProfitTaken,
 		arg.Quantity,
 		arg.FilledQuantity,
 		arg.SoldQuantity,
@@ -171,6 +175,8 @@ func (q *Queries) CreatePaperTrade(ctx context.Context, arg CreatePaperTradePara
 		&i.BreakEvenArmed,
 		&i.MaxBidPrice,
 		&i.MinBidPrice,
+		&i.EntryLowPrice,
+		&i.PartialProfitTaken,
 		&i.Quantity,
 		&i.FilledQuantity,
 		&i.SoldQuantity,
@@ -639,10 +645,10 @@ func (q *Queries) GetOpenOrdersManual(ctx context.Context) ([]TradeLogManual, er
 }
 
 const getOpenPaperTradeBySymbol = `-- name: GetOpenPaperTradeBySymbol :one
-SELECT id, strategy_version, symbol, signal_at, status, entry_mode, support_price, entry_price, target_price, min_exit_price, expected_net_profit, break_even_armed, max_bid_price, min_bid_price, quantity, filled_quantity, sold_quantity, buy_quote, sell_quote, fees, pnl, opened_at, closed_at, exit_reason, last_price, updated_at FROM paper_trade
+SELECT id, strategy_version, symbol, signal_at, status, entry_mode, support_price, entry_price, target_price, min_exit_price, expected_net_profit, break_even_armed, max_bid_price, min_bid_price, entry_low_price, partial_profit_taken, quantity, filled_quantity, sold_quantity, buy_quote, sell_quote, fees, pnl, opened_at, closed_at, exit_reason, last_price, updated_at FROM paper_trade
 WHERE symbol = $1
   AND strategy_version = $2
-  AND status IN ('BUY_PENDING', 'POSITION_OPEN', 'SELL_PENDING')
+  AND status IN ('BUY_PENDING', 'PULLBACK_SEEN', 'POSITION_OPEN', 'SELL_PENDING')
 ORDER BY id DESC
 LIMIT 1
 `
@@ -670,6 +676,8 @@ func (q *Queries) GetOpenPaperTradeBySymbol(ctx context.Context, arg GetOpenPape
 		&i.BreakEvenArmed,
 		&i.MaxBidPrice,
 		&i.MinBidPrice,
+		&i.EntryLowPrice,
+		&i.PartialProfitTaken,
 		&i.Quantity,
 		&i.FilledQuantity,
 		&i.SoldQuantity,
@@ -687,7 +695,7 @@ func (q *Queries) GetOpenPaperTradeBySymbol(ctx context.Context, arg GetOpenPape
 }
 
 const getPaperTradeBySignal = `-- name: GetPaperTradeBySignal :one
-SELECT id, strategy_version, symbol, signal_at, status, entry_mode, support_price, entry_price, target_price, min_exit_price, expected_net_profit, break_even_armed, max_bid_price, min_bid_price, quantity, filled_quantity, sold_quantity, buy_quote, sell_quote, fees, pnl, opened_at, closed_at, exit_reason, last_price, updated_at FROM paper_trade
+SELECT id, strategy_version, symbol, signal_at, status, entry_mode, support_price, entry_price, target_price, min_exit_price, expected_net_profit, break_even_armed, max_bid_price, min_bid_price, entry_low_price, partial_profit_taken, quantity, filled_quantity, sold_quantity, buy_quote, sell_quote, fees, pnl, opened_at, closed_at, exit_reason, last_price, updated_at FROM paper_trade
 WHERE symbol = $1
   AND signal_at = $2
   AND strategy_version = $3
@@ -719,6 +727,8 @@ func (q *Queries) GetPaperTradeBySignal(ctx context.Context, arg GetPaperTradeBy
 		&i.BreakEvenArmed,
 		&i.MaxBidPrice,
 		&i.MinBidPrice,
+		&i.EntryLowPrice,
+		&i.PartialProfitTaken,
 		&i.Quantity,
 		&i.FilledQuantity,
 		&i.SoldQuantity,
@@ -740,7 +750,7 @@ SELECT
     COUNT(*)::int AS total,
     COUNT(*) FILTER (WHERE status = 'CLOSED')::int AS closed,
     COUNT(*) FILTER (WHERE status = 'CANCELED')::int AS canceled,
-    COUNT(*) FILTER (WHERE status IN ('BUY_PENDING', 'POSITION_OPEN', 'SELL_PENDING'))::int AS open,
+    COUNT(*) FILTER (WHERE status IN ('BUY_PENDING', 'PULLBACK_SEEN', 'POSITION_OPEN', 'SELL_PENDING'))::int AS open,
     COALESCE(SUM(pnl) FILTER (WHERE status = 'CLOSED'), 0)::double precision AS total_pnl,
     COALESCE(SUM(pnl) FILTER (WHERE status IN ('POSITION_OPEN', 'SELL_PENDING')), 0)::double precision AS open_pnl,
     COALESCE(AVG(pnl) FILTER (WHERE status = 'CLOSED'), 0)::double precision AS average_pnl,
@@ -1015,8 +1025,8 @@ func (q *Queries) ListMarketSnapshots(ctx context.Context) ([]MarketSnapshot, er
 }
 
 const listOpenPaperTrades = `-- name: ListOpenPaperTrades :many
-SELECT id, strategy_version, symbol, signal_at, status, entry_mode, support_price, entry_price, target_price, min_exit_price, expected_net_profit, break_even_armed, max_bid_price, min_bid_price, quantity, filled_quantity, sold_quantity, buy_quote, sell_quote, fees, pnl, opened_at, closed_at, exit_reason, last_price, updated_at FROM paper_trade
-WHERE status IN ('BUY_PENDING', 'POSITION_OPEN', 'SELL_PENDING')
+SELECT id, strategy_version, symbol, signal_at, status, entry_mode, support_price, entry_price, target_price, min_exit_price, expected_net_profit, break_even_armed, max_bid_price, min_bid_price, entry_low_price, partial_profit_taken, quantity, filled_quantity, sold_quantity, buy_quote, sell_quote, fees, pnl, opened_at, closed_at, exit_reason, last_price, updated_at FROM paper_trade
+WHERE status IN ('BUY_PENDING', 'PULLBACK_SEEN', 'POSITION_OPEN', 'SELL_PENDING')
   AND strategy_version = $1
 ORDER BY id
 `
@@ -1045,6 +1055,8 @@ func (q *Queries) ListOpenPaperTrades(ctx context.Context, strategyVersion int) 
 			&i.BreakEvenArmed,
 			&i.MaxBidPrice,
 			&i.MinBidPrice,
+			&i.EntryLowPrice,
+			&i.PartialProfitTaken,
 			&i.Quantity,
 			&i.FilledQuantity,
 			&i.SoldQuantity,
@@ -1730,38 +1742,42 @@ UPDATE paper_trade SET
     break_even_armed = $4,
     max_bid_price = $5,
     min_bid_price = $6,
-    filled_quantity = $7,
-    sold_quantity = $8,
-    buy_quote = $9,
-    sell_quote = $10,
-    fees = $11,
-    pnl = $12,
-    opened_at = $13,
-    closed_at = $14,
-    exit_reason = $15,
-    last_price = $16,
-    updated_at = $17
+    entry_low_price = $7,
+    partial_profit_taken = $8,
+    filled_quantity = $9,
+    sold_quantity = $10,
+    buy_quote = $11,
+    sell_quote = $12,
+    fees = $13,
+    pnl = $14,
+    opened_at = $15,
+    closed_at = $16,
+    exit_reason = $17,
+    last_price = $18,
+    updated_at = $19
 WHERE id = $1
 `
 
 type UpdatePaperTradeParams struct {
-	ID             int
-	Status         string
-	TargetPrice    float64
-	BreakEvenArmed bool
-	MaxBidPrice    float64
-	MinBidPrice    float64
-	FilledQuantity float64
-	SoldQuantity   float64
-	BuyQuote       float64
-	SellQuote      float64
-	Fees           float64
-	Pnl            float64
-	OpenedAt       *time.Time
-	ClosedAt       *time.Time
-	ExitReason     string
-	LastPrice      float64
-	UpdatedAt      time.Time
+	ID                 int
+	Status             string
+	TargetPrice        float64
+	BreakEvenArmed     bool
+	MaxBidPrice        float64
+	MinBidPrice        float64
+	EntryLowPrice      float64
+	PartialProfitTaken bool
+	FilledQuantity     float64
+	SoldQuantity       float64
+	BuyQuote           float64
+	SellQuote          float64
+	Fees               float64
+	Pnl                float64
+	OpenedAt           *time.Time
+	ClosedAt           *time.Time
+	ExitReason         string
+	LastPrice          float64
+	UpdatedAt          time.Time
 }
 
 func (q *Queries) UpdatePaperTrade(ctx context.Context, arg UpdatePaperTradeParams) error {
@@ -1772,6 +1788,8 @@ func (q *Queries) UpdatePaperTrade(ctx context.Context, arg UpdatePaperTradePara
 		arg.BreakEvenArmed,
 		arg.MaxBidPrice,
 		arg.MinBidPrice,
+		arg.EntryLowPrice,
+		arg.PartialProfitTaken,
 		arg.FilledQuantity,
 		arg.SoldQuantity,
 		arg.BuyQuote,
