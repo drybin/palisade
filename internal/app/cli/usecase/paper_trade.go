@@ -218,6 +218,10 @@ func (u *PaperTradeRunner) processPaperTrade(ctx context.Context, trade *repo.Pa
 	askQty, _ := parseDecimalValue(book.AskQty)
 	trade.LastPrice = (bid + ask) / 2
 	fee := math.Max(parseDecimal(symbol.MakerCommission), parseDecimal(symbol.TakerCommission))
+	lotStep, err := swapLotStep(&symbol)
+	if err != nil {
+		return err
+	}
 
 	if signal.Symbol == trade.Symbol && signal.StrategyVersion == trade.StrategyVersion && signal.TargetPrice >= signal.MinExitPrice {
 		updatePaperTarget(trade, signal.TargetPrice, signalPriceStep(&symbol))
@@ -240,11 +244,7 @@ func (u *PaperTradeRunner) processPaperTrade(ctx context.Context, trade *repo.Pa
 				return u.persistPaperTrade(ctx, trade, now, bid, fee)
 			}
 			remaining := trade.Quantity - trade.FilledQuantity
-			step, stepErr := swapLotStep(&symbol)
-			if stepErr != nil {
-				return stepErr
-			}
-			fillQty := swapRoundQtyDown(paperFillQuantity(remaining, askQty), step)
+			fillQty := swapRoundQtyDown(paperFillQuantity(remaining, askQty), lotStep)
 			if fillQty > 0 {
 				fillPrice := math.Min(ask, trade.EntryPrice)
 				trade.FilledQuantity += fillQty
@@ -265,13 +265,9 @@ func (u *PaperTradeRunner) processPaperTrade(ctx context.Context, trade *repo.Pa
 			return u.persistPaperTrade(ctx, trade, now, bid, fee)
 		}
 		if paperReboundConfirmed(trade, bid) {
-			step, stepErr := swapLotStep(&symbol)
-			if stepErr != nil {
-				return stepErr
-			}
-			quantityAtAsk := swapRoundQtyDown(signalOrderQuoteUSDT/ask, step)
+			quantityAtAsk := swapRoundQtyDown(signalOrderQuoteUSDT/ask, lotStep)
 			remaining := math.Min(trade.Quantity, quantityAtAsk) - trade.FilledQuantity
-			fillQty := swapRoundQtyDown(paperFillQuantity(remaining, askQty), step)
+			fillQty := swapRoundQtyDown(paperFillQuantity(remaining, askQty), lotStep)
 			if fillQty > 0 {
 				fillPrice := ask
 				if !isValidPaperOrder(symbol, order.BUY, fillPrice, fillQty) {
@@ -292,9 +288,12 @@ func (u *PaperTradeRunner) processPaperTrade(ctx context.Context, trade *repo.Pa
 	}
 
 	if trade.Status == "POSITION_OPEN" || trade.Status == "SELL_PENDING" {
-		if trade.FilledQuantity <= trade.SoldQuantity {
+		if paperQuantityReached(trade.SoldQuantity, trade.FilledQuantity, lotStep) {
+			trade.SoldQuantity = trade.FilledQuantity
 			trade.Status = "CLOSED"
-			trade.ExitReason = "NO_REMAINING_ASSET"
+			if trade.ExitReason == "" {
+				trade.ExitReason = "NO_REMAINING_ASSET"
+			}
 			closed := now
 			trade.ClosedAt = &closed
 			return u.persistPaperTrade(ctx, trade, now, bid, fee)
@@ -317,7 +316,7 @@ func (u *PaperTradeRunner) processPaperTrade(ctx context.Context, trade *repo.Pa
 			reason = trade.ExitReason
 		}
 		partialTarget := paperPartialProfitQuantity(trade.FilledQuantity, symbol)
-		partialPending := trade.StrategyVersion >= 8 && !trade.PartialProfitTaken && trade.SoldQuantity < partialTarget-1e-12 &&
+		partialPending := trade.StrategyVersion >= 8 && !trade.PartialProfitTaken && !paperQuantityReached(trade.SoldQuantity, partialTarget, lotStep) &&
 			bid >= paperQuickProfitBidPrice(buyPrice, fee)
 		if reason == "" && partialPending && bid >= paperQuickProfitBidPrice(buyPrice, fee) {
 			reason = "PARTIAL_PROFIT"
@@ -331,11 +330,7 @@ func (u *PaperTradeRunner) processPaperTrade(ctx context.Context, trade *repo.Pa
 			if reason == "PARTIAL_PROFIT" {
 				remaining = partialTarget - trade.SoldQuantity
 			}
-			step, stepErr := swapLotStep(&symbol)
-			if stepErr != nil {
-				return stepErr
-			}
-			fillQty := swapRoundQtyDown(paperFillQuantity(remaining, bidQty), step)
+			fillQty := swapRoundQtyDown(paperFillQuantity(remaining, bidQty), lotStep)
 			if fillQty > 0 {
 				fillPrice := bid
 				if reason != "TARGET_REACHED" && reason != "PARTIAL_PROFIT" {
@@ -348,13 +343,13 @@ func (u *PaperTradeRunner) processPaperTrade(ctx context.Context, trade *repo.Pa
 				trade.Status = "SELL_PENDING"
 				if reason == "PARTIAL_PROFIT" {
 					trade.Status = "POSITION_OPEN"
-					if trade.SoldQuantity >= partialTarget-1e-12 {
+					if paperQuantityReached(trade.SoldQuantity, partialTarget, lotStep) {
 						trade.PartialProfitTaken = true
 					}
 				}
 			}
 		}
-		if trade.SoldQuantity >= trade.FilledQuantity-1e-12 {
+		if paperQuantityReached(trade.SoldQuantity, trade.FilledQuantity, lotStep) {
 			trade.SoldQuantity = trade.FilledQuantity
 			trade.Status = "CLOSED"
 			closed := now
@@ -362,6 +357,17 @@ func (u *PaperTradeRunner) processPaperTrade(ctx context.Context, trade *repo.Pa
 		}
 	}
 	return u.persistPaperTrade(ctx, trade, now, bid, fee)
+}
+
+func paperQuantityReached(actual, target, lotStep float64) bool {
+	if target <= 0 {
+		return actual >= target
+	}
+	tolerance := math.Max(1e-12, math.Abs(target)*1e-12)
+	if lotStep > 0 {
+		tolerance = math.Max(tolerance, lotStep*1e-6)
+	}
+	return actual >= target-tolerance
 }
 
 func paperReboundConfirmed(trade *repo.PaperTrade, bid float64) bool {

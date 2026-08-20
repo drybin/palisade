@@ -174,6 +174,17 @@ func TestPaperPartialProfitQuantityRoundsDownToLotStep(t *testing.T) {
 	}
 }
 
+func TestPaperQuantityReached_toleratesLargeQuantityFloatResidue(t *testing.T) {
+	target := 52854.120000004
+	actual := 52854.12
+	if !paperQuantityReached(actual, target, 0.01) {
+		t.Fatal("expected a sub-step float residue to count as fully sold")
+	}
+	if paperQuantityReached(target-0.01, target, 0.01) {
+		t.Fatal("expected one remaining lot to keep the sale pending")
+	}
+}
+
 func TestUpdatePaperTarget_currentStrategyNeverLowersTarget(t *testing.T) {
 	trade := repo.PaperTrade{StrategyVersion: paperStrategyVersion, TargetPrice: 101}
 	updatePaperTarget(&trade, 100.5, 0.01)
