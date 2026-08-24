@@ -62,7 +62,7 @@ func TestPaperFillQuantity_doesNotExceedRemaining(t *testing.T) {
 	}
 }
 
-func TestBuildPaperTrade_v8WaitsForPullback(t *testing.T) {
+func TestBuildPaperTrade_v9WaitsForPullback(t *testing.T) {
 	trade, ok, err := buildPaperTrade(
 		repo.PalisadeSignalState{
 			Symbol: "TESTUSDT", SupportPrice: 100, EntryPrice: 100.1,
@@ -77,10 +77,10 @@ func TestBuildPaperTrade_v8WaitsForPullback(t *testing.T) {
 		time.Now().UTC(),
 	)
 	if err != nil || !ok {
-		t.Fatalf("expected valid v8 paper trade, ok=%v err=%v", ok, err)
+		t.Fatalf("expected valid v9 paper trade, ok=%v err=%v", ok, err)
 	}
-	if trade.EntryMode != "PULLBACK_RECLAIM_PARTIAL_V8" || trade.Status != "BUY_PENDING" || math.Abs(trade.SupportPrice-100) > 1e-12 || math.Abs(trade.EntryPrice-100.1) > 1e-12 {
-		t.Fatalf("unexpected v8 levels: mode=%s status=%s support=%.4f entry=%.4f", trade.EntryMode, trade.Status, trade.SupportPrice, trade.EntryPrice)
+	if trade.EntryMode != "RECLAIM_STOP_PARTIAL_V9" || trade.Status != "BUY_PENDING" || math.Abs(trade.SupportPrice-100) > 1e-12 || math.Abs(trade.EntryPrice-100.1) > 1e-12 {
+		t.Fatalf("unexpected v9 levels: mode=%s status=%s support=%.4f entry=%.4f", trade.EntryMode, trade.Status, trade.SupportPrice, trade.EntryPrice)
 	}
 	if math.Abs(trade.Quantity-0.099) > 1e-12 || trade.FilledQuantity != 0 || trade.BuyQuote != 0 || trade.OpenedAt != nil {
 		t.Fatalf("expected pending pullback entry, quantity=%.8f filled=%.8f quote=%.8f", trade.Quantity, trade.FilledQuantity, trade.BuyQuote)
@@ -107,7 +107,7 @@ func TestPaperTrailingStopLocksPositiveNetProfit(t *testing.T) {
 	}
 }
 
-func TestPaperEntryCancelReason_v8DistinguishesInvalidation(t *testing.T) {
+func TestPaperEntryCancelReason_currentStrategyDistinguishesInvalidation(t *testing.T) {
 	now := time.Now().UTC()
 	trade := repo.PaperTrade{
 		StrategyVersion: paperStrategyVersion,
@@ -127,7 +127,7 @@ func TestPaperEntryCancelReason_v8DistinguishesInvalidation(t *testing.T) {
 	}
 }
 
-func TestPaperEntryCancelReason_v8RejectsDeepPullback(t *testing.T) {
+func TestPaperEntryCancelReason_currentStrategyRejectsDeepPullback(t *testing.T) {
 	now := time.Now().UTC()
 	trade := repo.PaperTrade{
 		StrategyVersion: paperStrategyVersion,
@@ -164,6 +164,55 @@ func TestPaperQuickProfitPriceCoversFees(t *testing.T) {
 	net := sellPrice*(1-fee)/(buyPrice*(1+fee)) - 1
 	if math.Abs(net-paperQuickProfitNet) > 1e-12 {
 		t.Fatalf("expected %.6f net profit, got %.6f", paperQuickProfitNet, net)
+	}
+}
+
+func TestEnsurePaperTargetAfterFill_usesActualBuyPrice(t *testing.T) {
+	fee := 0.001
+	trade := repo.PaperTrade{
+		StrategyVersion: paperStrategyVersion,
+		TargetPrice:     99,
+		FilledQuantity:  10,
+		BuyQuote:        1000,
+	}
+	ensurePaperTargetAfterFill(&trade, fee, 0.01)
+	minimum := paperMainTargetBidPrice(100, fee)
+	if trade.TargetPrice < minimum {
+		t.Fatalf("expected target at least %.8f, got %.8f", minimum, trade.TargetPrice)
+	}
+	net := trade.TargetPrice*(1-fee)/(100*(1+fee)) - 1
+	if net < paperMainTargetNet {
+		t.Fatalf("expected target net profit at least %.6f, got %.6f", paperMainTargetNet, net)
+	}
+}
+
+func TestPaperExitReason_v9StopsFailedReclaim(t *testing.T) {
+	now := time.Now().UTC()
+	trade := repo.PaperTrade{
+		StrategyVersion: paperStrategyVersion,
+		SignalAt:        now,
+		EntryLowPrice:   100,
+	}
+	if got := paperExitReason(trade, now, 99.89, 90, 100.2, 0.001); got != "RECLAIM_FAILED" {
+		t.Fatalf("expected failed reclaim exit, got %q", got)
+	}
+	trade.StrategyVersion = 8
+	if got := paperExitReason(trade, now, 99.89, 90, 100.2, 0.001); got != "" {
+		t.Fatalf("expected v8 behavior to remain unchanged, got %q", got)
+	}
+}
+
+func TestMarkPaperPartialProfitTaken_v9ArmsProtection(t *testing.T) {
+	trade := repo.PaperTrade{StrategyVersion: paperStrategyVersion}
+	markPaperPartialProfitTaken(&trade)
+	if !trade.PartialProfitTaken || !trade.BreakEvenArmed {
+		t.Fatalf("expected partial profit and protection to be armed: %+v", trade)
+	}
+
+	legacy := repo.PaperTrade{StrategyVersion: 8}
+	markPaperPartialProfitTaken(&legacy)
+	if !legacy.PartialProfitTaken || legacy.BreakEvenArmed {
+		t.Fatalf("expected v8 protection behavior to remain unchanged: %+v", legacy)
 	}
 }
 

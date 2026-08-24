@@ -16,12 +16,14 @@ import (
 
 const (
 	paperLockKey             = "palisade:paper-trading"
-	paperStrategyVersion     = 8
+	paperStrategyVersion     = 9
 	maxPaperOpenTrades       = 1
 	paperReboundEntryPercent = 0.0015
+	paperReclaimFailureLimit = 0.001
 	paperMaxPullbackDepth    = 0.004
 	paperQuickProfitNet      = 0.002
 	paperQuickProfitShare    = 0.5
+	paperMainTargetNet       = 0.006
 	paperTrailingTrigger     = 0.006
 	paperTrailingDistance    = 0.0025
 	paperMinimumLockedProfit = 0.00025
@@ -194,7 +196,7 @@ func buildPaperTrade(signal repo.PalisadeSignalState, book mexc.BookTicker, symb
 		Symbol:            signal.Symbol,
 		SignalAt:          paperSignalAt(signal),
 		Status:            "BUY_PENDING",
-		EntryMode:         "PULLBACK_RECLAIM_PARTIAL_V8",
+		EntryMode:         "RECLAIM_STOP_PARTIAL_V9",
 		SupportPrice:      support,
 		EntryPrice:        entry,
 		TargetPrice:       roundPriceDown(signal.TargetPrice, signalPriceStep(&symbol)),
@@ -278,6 +280,7 @@ func (u *PaperTradeRunner) processPaperTrade(ctx context.Context, trade *repo.Pa
 				trade.FilledQuantity += fillQty
 				trade.BuyQuote += fillPrice * fillQty
 				trade.Fees += fillPrice * fillQty * fee
+				ensurePaperTargetAfterFill(trade, fee, signalPriceStep(&symbol))
 				trade.MaxBidPrice = bid
 				trade.MinBidPrice = bid
 				opened := now
@@ -321,7 +324,11 @@ func (u *PaperTradeRunner) processPaperTrade(ctx context.Context, trade *repo.Pa
 		if reason == "" && partialPending && bid >= paperQuickProfitBidPrice(buyPrice, fee) {
 			reason = "PARTIAL_PROFIT"
 		}
-		shouldSell := reason != "" || bid >= trade.TargetPrice
+		targetReached := bid >= trade.TargetPrice
+		if trade.StrategyVersion >= 9 {
+			targetReached = targetReached && bid >= paperMainTargetBidPrice(buyPrice, fee)
+		}
+		shouldSell := reason != "" || targetReached
 		if shouldSell {
 			if reason == "" {
 				reason = "TARGET_REACHED"
@@ -344,7 +351,7 @@ func (u *PaperTradeRunner) processPaperTrade(ctx context.Context, trade *repo.Pa
 				if reason == "PARTIAL_PROFIT" {
 					trade.Status = "POSITION_OPEN"
 					if paperQuantityReached(trade.SoldQuantity, partialTarget, lotStep) {
-						trade.PartialProfitTaken = true
+						markPaperPartialProfitTaken(trade)
 					}
 				}
 			}
@@ -388,6 +395,24 @@ func updatePaperTarget(trade *repo.PaperTrade, target, priceStep float64) {
 	}
 }
 
+func ensurePaperTargetAfterFill(trade *repo.PaperTrade, fee, priceStep float64) {
+	if trade.StrategyVersion < 9 || trade.FilledQuantity <= 0 {
+		return
+	}
+	buyPrice := trade.BuyQuote / trade.FilledQuantity
+	minimumTarget := roundPriceUp(paperMainTargetBidPrice(buyPrice, fee), priceStep)
+	if minimumTarget > trade.TargetPrice {
+		trade.TargetPrice = minimumTarget
+	}
+}
+
+func markPaperPartialProfitTaken(trade *repo.PaperTrade) {
+	trade.PartialProfitTaken = true
+	if trade.StrategyVersion >= 9 {
+		trade.BreakEvenArmed = true
+	}
+}
+
 func paperEntryCancelReason(trade repo.PaperTrade, now time.Time, bid float64) string {
 	if trade.StrategyVersion < 7 {
 		if bid < trade.EntryPrice*(1-supportBreakPercent) || now.Sub(trade.SignalAt) > signalBuyTimeout {
@@ -413,6 +438,9 @@ func paperEntryCancelReason(trade repo.PaperTrade, now time.Time, bid float64) s
 func paperExitReason(trade repo.PaperTrade, now time.Time, bid, support, buyPrice, fee float64) string {
 	if trade.StrategyVersion >= 7 && trade.BreakEvenArmed && bid <= paperTrailingStopPrice(trade, buyPrice, fee) {
 		return "TRAILING_STOP"
+	}
+	if trade.StrategyVersion >= 9 && !trade.PartialProfitTaken && trade.EntryLowPrice > 0 && bid < trade.EntryLowPrice*(1-paperReclaimFailureLimit) {
+		return "RECLAIM_FAILED"
 	}
 	if trade.StrategyVersion >= 4 && trade.BreakEvenArmed && bid <= paperBreakEvenBidPrice(buyPrice, fee) {
 		return "BREAKEVEN_STOP"
@@ -446,10 +474,18 @@ func paperV7TrailingActivationPrice(buyPrice, fee float64) float64 {
 }
 
 func paperQuickProfitBidPrice(buyPrice, fee float64) float64 {
+	return paperNetExitBidPrice(buyPrice, fee, paperQuickProfitNet)
+}
+
+func paperMainTargetBidPrice(buyPrice, fee float64) float64 {
+	return paperNetExitBidPrice(buyPrice, fee, paperMainTargetNet)
+}
+
+func paperNetExitBidPrice(buyPrice, fee, netProfit float64) float64 {
 	if buyPrice <= 0 || fee < 0 || fee >= 1 {
 		return math.Inf(1)
 	}
-	return buyPrice * (1 + fee) * (1 + paperQuickProfitNet) / (1 - fee)
+	return buyPrice * (1 + fee) * (1 + netProfit) / (1 - fee)
 }
 
 func paperPartialProfitQuantity(filledQuantity float64, symbol mexc.SymbolDetail) float64 {
