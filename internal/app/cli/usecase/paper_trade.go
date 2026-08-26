@@ -103,7 +103,7 @@ func (u *PaperTradeRunner) Process(ctx context.Context, debug bool) error {
 			openSlotsUsed++
 		}
 		if debug {
-			fmt.Printf("paper %s: status=%s mode=%s support=%.8f entry_low=%.8f trailing=%t partial=%t max_bid=%.8f min_bid=%.8f filled=%.8f sold=%.8f mark_pnl=%.8f\n", trade.Symbol, trade.Status, trade.EntryMode, trade.SupportPrice, trade.EntryLowPrice, trade.BreakEvenArmed, trade.PartialProfitTaken, trade.MaxBidPrice, trade.MinBidPrice, trade.FilledQuantity, trade.SoldQuantity, trade.PnL)
+			fmt.Printf("paper %s: status=%s mode=%s support=%.8f entry_low=%.8f trailing=%t partial=%t max_bid=%.8f min_bid=%.8f filled=%.8f sold=%.8f remaining=%.12f mark_pnl=%.8f\n", trade.Symbol, trade.Status, trade.EntryMode, trade.SupportPrice, trade.EntryLowPrice, trade.BreakEvenArmed, trade.PartialProfitTaken, trade.MaxBidPrice, trade.MinBidPrice, trade.FilledQuantity, trade.SoldQuantity, math.Max(0, trade.FilledQuantity-trade.SoldQuantity), trade.PnL)
 		}
 	}
 
@@ -246,7 +246,7 @@ func (u *PaperTradeRunner) processPaperTrade(ctx context.Context, trade *repo.Pa
 				return u.persistPaperTrade(ctx, trade, now, bid, fee)
 			}
 			remaining := trade.Quantity - trade.FilledQuantity
-			fillQty := swapRoundQtyDown(paperFillQuantity(remaining, askQty), lotStep)
+			fillQty := paperRoundFillQtyDown(paperFillQuantity(remaining, askQty), lotStep)
 			if fillQty > 0 {
 				fillPrice := math.Min(ask, trade.EntryPrice)
 				trade.FilledQuantity += fillQty
@@ -269,7 +269,7 @@ func (u *PaperTradeRunner) processPaperTrade(ctx context.Context, trade *repo.Pa
 		if paperReboundConfirmed(trade, bid) {
 			quantityAtAsk := swapRoundQtyDown(signalOrderQuoteUSDT/ask, lotStep)
 			remaining := math.Min(trade.Quantity, quantityAtAsk) - trade.FilledQuantity
-			fillQty := swapRoundQtyDown(paperFillQuantity(remaining, askQty), lotStep)
+			fillQty := paperRoundFillQtyDown(paperFillQuantity(remaining, askQty), lotStep)
 			if fillQty > 0 {
 				fillPrice := ask
 				if !isValidPaperOrder(symbol, order.BUY, fillPrice, fillQty) {
@@ -337,7 +337,7 @@ func (u *PaperTradeRunner) processPaperTrade(ctx context.Context, trade *repo.Pa
 			if reason == "PARTIAL_PROFIT" {
 				remaining = partialTarget - trade.SoldQuantity
 			}
-			fillQty := swapRoundQtyDown(paperFillQuantity(remaining, bidQty), lotStep)
+			fillQty := paperRoundFillQtyDown(paperFillQuantity(remaining, bidQty), lotStep)
 			if fillQty > 0 {
 				fillPrice := bid
 				if reason != "TARGET_REACHED" && reason != "PARTIAL_PROFIT" {
@@ -375,6 +375,19 @@ func paperQuantityReached(actual, target, lotStep float64) bool {
 		tolerance = math.Max(tolerance, lotStep*1e-6)
 	}
 	return actual >= target-tolerance
+}
+
+func paperRoundFillQtyDown(quantity, lotStep float64) float64 {
+	if quantity <= 0 || lotStep <= 0 {
+		return 0
+	}
+	units := quantity / lotStep
+	nearestUnits := math.Round(units)
+	tolerance := math.Max(1e-12, math.Abs(units)*1e-12)
+	if math.Abs(units-nearestUnits) <= tolerance {
+		return nearestUnits * lotStep
+	}
+	return math.Floor(units) * lotStep
 }
 
 func paperReboundConfirmed(trade *repo.PaperTrade, bid float64) bool {

@@ -234,6 +234,19 @@ func TestPaperQuantityReached_toleratesLargeQuantityFloatResidue(t *testing.T) {
 	}
 }
 
+func TestPaperRoundFillQtyDown_preservesLastLotAfterSubtraction(t *testing.T) {
+	remaining := math.Nextafter(0.01, 0)
+	if swapRoundQtyDown(remaining, 0.01) != 0 {
+		t.Fatal("test fixture no longer reproduces the floor rounding issue")
+	}
+	if got := paperRoundFillQtyDown(remaining, 0.01); math.Abs(got-0.01) > 1e-12 {
+		t.Fatalf("expected final lot 0.01, got %.16f", got)
+	}
+	if got := paperRoundFillQtyDown(0.019, 0.01); math.Abs(got-0.01) > 1e-12 {
+		t.Fatalf("expected genuine fractional lot to round down, got %.16f", got)
+	}
+}
+
 func TestUpdatePaperTarget_currentStrategyNeverLowersTarget(t *testing.T) {
 	trade := repo.PaperTrade{StrategyVersion: paperStrategyVersion, TargetPrice: 101}
 	updatePaperTarget(&trade, 100.5, 0.01)
