@@ -16,7 +16,7 @@ import (
 
 const (
 	paperLockKey             = "palisade:paper-trading"
-	paperStrategyVersion     = 9
+	paperStrategyVersion     = 10
 	maxPaperOpenTrades       = 1
 	paperReboundEntryPercent = 0.0015
 	paperReclaimFailureLimit = 0.001
@@ -196,7 +196,7 @@ func buildPaperTrade(signal repo.PalisadeSignalState, book mexc.BookTicker, symb
 		Symbol:            signal.Symbol,
 		SignalAt:          paperSignalAt(signal),
 		Status:            "BUY_PENDING",
-		EntryMode:         "RECLAIM_STOP_PARTIAL_V9",
+		EntryMode:         "RECLAIM_ENTRY_PARTIAL_V10",
 		SupportPrice:      support,
 		EntryPrice:        entry,
 		TargetPrice:       roundPriceDown(signal.TargetPrice, signalPriceStep(&symbol)),
@@ -398,7 +398,10 @@ func paperReboundConfirmed(trade *repo.PaperTrade, bid float64) bool {
 		trade.EntryLowPrice = bid
 		return false
 	}
-	return bid >= trade.EntryLowPrice*(1+paperReboundEntryPercent)
+	if bid < trade.EntryLowPrice*(1+paperReboundEntryPercent) {
+		return false
+	}
+	return trade.StrategyVersion < 10 || bid >= trade.EntryPrice
 }
 
 func updatePaperTarget(trade *repo.PaperTrade, target, priceStep float64) {
@@ -441,6 +444,9 @@ func paperEntryCancelReason(trade repo.PaperTrade, now time.Time, bid float64) s
 	}
 	if trade.StrategyVersion >= 8 && trade.Status == "PULLBACK_SEEN" && bid < trade.EntryPrice*(1-paperMaxPullbackDepth) {
 		return "PULLBACK_TOO_DEEP"
+	}
+	if trade.StrategyVersion >= 10 && trade.Status == "PULLBACK_SEEN" && bid > trade.EntryPrice*(1+paperEntryRunawayPercent) {
+		return "RECLAIM_RAN_AWAY"
 	}
 	if trade.Status == "BUY_PENDING" && bid > trade.EntryPrice*(1+paperEntryRunawayPercent) {
 		return "ENTRY_RAN_AWAY"
