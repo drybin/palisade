@@ -16,7 +16,7 @@ import (
 
 const (
 	paperLockKey             = "palisade:paper-trading"
-	paperStrategyVersion     = 10
+	paperStrategyVersion     = 11
 	maxPaperOpenTrades       = 1
 	paperReboundEntryPercent = 0.0015
 	paperReclaimFailureLimit = 0.001
@@ -196,7 +196,7 @@ func buildPaperTrade(signal repo.PalisadeSignalState, book mexc.BookTicker, symb
 		Symbol:            signal.Symbol,
 		SignalAt:          paperSignalAt(signal),
 		Status:            "BUY_PENDING",
-		EntryMode:         "RECLAIM_ENTRY_PARTIAL_V10",
+		EntryMode:         "RECLAIM_ENTRY_DIAGNOSTIC_V11",
 		SupportPrice:      support,
 		EntryPrice:        entry,
 		TargetPrice:       roundPriceDown(signal.TargetPrice, signalPriceStep(&symbol)),
@@ -243,6 +243,9 @@ func (u *PaperTradeRunner) processPaperTrade(ctx context.Context, trade *repo.Pa
 			if trade.StrategyVersion >= 8 {
 				trade.Status = "PULLBACK_SEEN"
 				trade.EntryLowPrice = bid
+				if trade.StrategyVersion >= 11 {
+					trade.MaxBidPrice = bid
+				}
 				return u.persistPaperTrade(ctx, trade, now, bid, fee)
 			}
 			remaining := trade.Quantity - trade.FilledQuantity
@@ -396,7 +399,13 @@ func paperReboundConfirmed(trade *repo.PaperTrade, bid float64) bool {
 	}
 	if trade.EntryLowPrice <= 0 || bid < trade.EntryLowPrice {
 		trade.EntryLowPrice = bid
+		if trade.StrategyVersion >= 11 {
+			trade.MaxBidPrice = bid
+		}
 		return false
+	}
+	if trade.StrategyVersion >= 11 && bid > trade.MaxBidPrice {
+		trade.MaxBidPrice = bid
 	}
 	if bid < trade.EntryLowPrice*(1+paperReboundEntryPercent) {
 		return false
@@ -440,6 +449,12 @@ func paperEntryCancelReason(trade repo.PaperTrade, now time.Time, bid float64) s
 		return "SUPPORT_BROKEN_BEFORE_ENTRY"
 	}
 	if now.Sub(trade.SignalAt) > paperPullbackTimeout {
+		if trade.StrategyVersion >= 11 {
+			if trade.Status == "PULLBACK_SEEN" {
+				return "RECLAIM_TIMEOUT"
+			}
+			return "ENTRY_NOT_TOUCHED"
+		}
 		return "PULLBACK_TIMEOUT"
 	}
 	if trade.StrategyVersion >= 8 && trade.Status == "PULLBACK_SEEN" && bid < trade.EntryPrice*(1-paperMaxPullbackDepth) {
