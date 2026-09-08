@@ -411,23 +411,24 @@ ORDER BY id;
 -- name: UpdatePaperTrade :exec
 UPDATE paper_trade SET
     status = $2,
-    target_price = $3,
-    break_even_armed = $4,
-    max_bid_price = $5,
-    min_bid_price = $6,
-    entry_low_price = $7,
-    partial_profit_taken = $8,
-    filled_quantity = $9,
-    sold_quantity = $10,
-    buy_quote = $11,
-    sell_quote = $12,
-    fees = $13,
-    pnl = $14,
-    opened_at = $15,
-    closed_at = $16,
-    exit_reason = $17,
-    last_price = $18,
-    updated_at = $19
+    entry_mode = $3,
+    target_price = $4,
+    break_even_armed = $5,
+    max_bid_price = $6,
+    min_bid_price = $7,
+    entry_low_price = $8,
+    partial_profit_taken = $9,
+    filled_quantity = $10,
+    sold_quantity = $11,
+    buy_quote = $12,
+    sell_quote = $13,
+    fees = $14,
+    pnl = $15,
+    opened_at = $16,
+    closed_at = $17,
+    exit_reason = $18,
+    last_price = $19,
+    updated_at = $20
 WHERE id = $1;
 
 -- name: GetPaperTradeStats :one

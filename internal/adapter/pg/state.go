@@ -983,6 +983,7 @@ func (u StateRepository) UpdatePaperTrade(ctx context.Context, trade repo.PaperT
 	if err := db.UpdatePaperTrade(ctx, palisade_database.UpdatePaperTradeParams{
 		ID:                 trade.ID,
 		Status:             trade.Status,
+		EntryMode:          trade.EntryMode,
 		TargetPrice:        trade.TargetPrice,
 		BreakEvenArmed:     trade.BreakEvenArmed,
 		MaxBidPrice:        trade.MaxBidPrice,

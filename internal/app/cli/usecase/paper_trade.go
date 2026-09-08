@@ -15,20 +15,21 @@ import (
 )
 
 const (
-	paperLockKey             = "palisade:paper-trading"
-	paperStrategyVersion     = 11
-	maxPaperOpenTrades       = 1
-	paperReboundEntryPercent = 0.0015
-	paperReclaimFailureLimit = 0.001
-	paperMaxPullbackDepth    = 0.004
-	paperQuickProfitNet      = 0.002
-	paperQuickProfitShare    = 0.5
-	paperMainTargetNet       = 0.006
-	paperTrailingTrigger     = 0.006
-	paperTrailingDistance    = 0.0025
-	paperMinimumLockedProfit = 0.00025
-	paperEntryRunawayPercent = 0.004
-	paperPullbackTimeout     = 30 * time.Minute
+	paperLockKey               = "palisade:paper-trading"
+	paperStrategyVersion       = 12
+	maxPaperOpenTrades         = 1
+	paperReboundEntryPercent   = 0.0015
+	paperReclaimConfirmPercent = 0.0025
+	paperReclaimFailureLimit   = 0.001
+	paperMaxPullbackDepth      = 0.004
+	paperQuickProfitNet        = 0.002
+	paperQuickProfitShare      = 0.5
+	paperMainTargetNet         = 0.006
+	paperTrailingTrigger       = 0.006
+	paperTrailingDistance      = 0.0025
+	paperMinimumLockedProfit   = 0.00025
+	paperEntryRunawayPercent   = 0.004
+	paperPullbackTimeout       = 30 * time.Minute
 )
 
 type IPaperTrade interface {
@@ -196,7 +197,7 @@ func buildPaperTrade(signal repo.PalisadeSignalState, book mexc.BookTicker, symb
 		Symbol:            signal.Symbol,
 		SignalAt:          paperSignalAt(signal),
 		Status:            "BUY_PENDING",
-		EntryMode:         "RECLAIM_ENTRY_DIAGNOSTIC_V11",
+		EntryMode:         "RECLAIM_2PASS_V12",
 		SupportPrice:      support,
 		EntryPrice:        entry,
 		TargetPrice:       roundPriceDown(signal.TargetPrice, signalPriceStep(&symbol)),
@@ -408,7 +409,22 @@ func paperReboundConfirmed(trade *repo.PaperTrade, bid float64) bool {
 		trade.MaxBidPrice = bid
 	}
 	if bid < trade.EntryLowPrice*(1+paperReboundEntryPercent) {
+		if trade.StrategyVersion >= 12 {
+			trade.EntryMode = "RECLAIM_2PASS_V12"
+		}
 		return false
+	}
+	if trade.StrategyVersion >= 12 {
+		confirmPrice := trade.EntryPrice * (1 + paperReclaimConfirmPercent)
+		if bid < confirmPrice {
+			trade.EntryMode = "RECLAIM_2PASS_V12"
+			return false
+		}
+		if trade.EntryMode != "RECLAIM_CONFIRMED_V12" {
+			trade.EntryMode = "RECLAIM_CONFIRMED_V12"
+			return false
+		}
+		return true
 	}
 	return trade.StrategyVersion < 10 || bid >= trade.EntryPrice
 }

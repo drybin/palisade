@@ -62,7 +62,7 @@ func TestPaperFillQuantity_doesNotExceedRemaining(t *testing.T) {
 	}
 }
 
-func TestBuildPaperTrade_v11WaitsForPullback(t *testing.T) {
+func TestBuildPaperTrade_v12WaitsForPullback(t *testing.T) {
 	trade, ok, err := buildPaperTrade(
 		repo.PalisadeSignalState{
 			Symbol: "TESTUSDT", SupportPrice: 100, EntryPrice: 100.1,
@@ -77,10 +77,10 @@ func TestBuildPaperTrade_v11WaitsForPullback(t *testing.T) {
 		time.Now().UTC(),
 	)
 	if err != nil || !ok {
-		t.Fatalf("expected valid v11 paper trade, ok=%v err=%v", ok, err)
+		t.Fatalf("expected valid v12 paper trade, ok=%v err=%v", ok, err)
 	}
-	if trade.EntryMode != "RECLAIM_ENTRY_DIAGNOSTIC_V11" || trade.Status != "BUY_PENDING" || math.Abs(trade.SupportPrice-100) > 1e-12 || math.Abs(trade.EntryPrice-100.1) > 1e-12 {
-		t.Fatalf("unexpected v11 levels: mode=%s status=%s support=%.4f entry=%.4f", trade.EntryMode, trade.Status, trade.SupportPrice, trade.EntryPrice)
+	if trade.EntryMode != "RECLAIM_2PASS_V12" || trade.Status != "BUY_PENDING" || math.Abs(trade.SupportPrice-100) > 1e-12 || math.Abs(trade.EntryPrice-100.1) > 1e-12 {
+		t.Fatalf("unexpected v12 levels: mode=%s status=%s support=%.4f entry=%.4f", trade.EntryMode, trade.Status, trade.SupportPrice, trade.EntryPrice)
 	}
 	if math.Abs(trade.Quantity-0.099) > 1e-12 || trade.FilledQuantity != 0 || trade.BuyQuote != 0 || trade.OpenedAt != nil {
 		t.Fatalf("expected pending pullback entry, quantity=%.8f filled=%.8f quote=%.8f", trade.Quantity, trade.FilledQuantity, trade.BuyQuote)
@@ -161,7 +161,7 @@ func TestPaperEntryCancelReason_v11DistinguishesReclaimTimeout(t *testing.T) {
 	}
 }
 
-func TestPaperReboundConfirmed_v11TracksRecoveryAndRequiresPlannedEntryPrice(t *testing.T) {
+func TestPaperReboundConfirmed_v12RequiresTwoConfirmationsAboveThreshold(t *testing.T) {
 	trade := repo.PaperTrade{StrategyVersion: paperStrategyVersion, EntryLowPrice: 100, EntryPrice: 100.1}
 	if paperReboundConfirmed(&trade, 99.8) {
 		t.Fatal("expected a new low not to confirm entry")
@@ -175,8 +175,23 @@ func TestPaperReboundConfirmed_v11TracksRecoveryAndRequiresPlannedEntryPrice(t *
 	if trade.MaxBidPrice != 99.95 {
 		t.Fatalf("expected recovery maximum 99.95, got %.8f", trade.MaxBidPrice)
 	}
-	if !paperReboundConfirmed(&trade, 100.1) {
-		t.Fatal("expected return to planned entry to confirm entry")
+	if paperReboundConfirmed(&trade, 100.1) {
+		t.Fatal("expected return to planned entry to remain unconfirmed")
+	}
+	if paperReboundConfirmed(&trade, 100.36) {
+		t.Fatal("expected first confirmation above threshold to wait for a second pass")
+	}
+	if trade.EntryMode != "RECLAIM_CONFIRMED_V12" {
+		t.Fatalf("expected persisted first confirmation, got %q", trade.EntryMode)
+	}
+	if !paperReboundConfirmed(&trade, 100.38) {
+		t.Fatal("expected second confirmation above threshold to confirm entry")
+	}
+	if paperReboundConfirmed(&trade, 100.1) {
+		t.Fatal("expected loss of confirmation threshold to reset confirmation")
+	}
+	if trade.EntryMode != "RECLAIM_2PASS_V12" {
+		t.Fatalf("expected confirmation reset, got %q", trade.EntryMode)
 	}
 
 	legacy := repo.PaperTrade{StrategyVersion: 9, EntryLowPrice: 99.8, EntryPrice: 100.1}
