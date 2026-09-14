@@ -16,10 +16,11 @@ import (
 
 const (
 	paperLockKey               = "palisade:paper-trading"
-	paperStrategyVersion       = 12
+	paperStrategyVersion       = 13
 	maxPaperOpenTrades         = 1
 	paperReboundEntryPercent   = 0.0015
 	paperReclaimConfirmPercent = 0.0025
+	paperMaxReclaimAskPremium  = 0.0015
 	paperReclaimFailureLimit   = 0.001
 	paperMaxPullbackDepth      = 0.004
 	paperQuickProfitNet        = 0.002
@@ -197,7 +198,7 @@ func buildPaperTrade(signal repo.PalisadeSignalState, book mexc.BookTicker, symb
 		Symbol:            signal.Symbol,
 		SignalAt:          paperSignalAt(signal),
 		Status:            "BUY_PENDING",
-		EntryMode:         "RECLAIM_2PASS_V12",
+		EntryMode:         "RECLAIM_2PASS_V13",
 		SupportPrice:      support,
 		EntryPrice:        entry,
 		TargetPrice:       roundPriceDown(signal.TargetPrice, signalPriceStep(&symbol)),
@@ -265,6 +266,9 @@ func (u *PaperTradeRunner) processPaperTrade(ctx context.Context, trade *repo.Pa
 
 	if trade.Status == "PULLBACK_SEEN" {
 		entryCancelReason := paperEntryCancelReason(*trade, now, bid)
+		if entryCancelReason == "" {
+			entryCancelReason = paperReclaimTooExpensive(*trade, bid, ask)
+		}
 		if entryCancelReason != "" {
 			trade.Status = "CANCELED"
 			trade.ExitReason = entryCancelReason
@@ -409,10 +413,23 @@ func paperReboundConfirmed(trade *repo.PaperTrade, bid float64) bool {
 		trade.MaxBidPrice = bid
 	}
 	if bid < trade.EntryLowPrice*(1+paperReboundEntryPercent) {
-		if trade.StrategyVersion >= 12 {
+		if trade.StrategyVersion >= 13 {
+			trade.EntryMode = "RECLAIM_2PASS_V13"
+		} else if trade.StrategyVersion >= 12 {
 			trade.EntryMode = "RECLAIM_2PASS_V12"
 		}
 		return false
+	}
+	if trade.StrategyVersion >= 13 {
+		if bid < trade.EntryPrice {
+			trade.EntryMode = "RECLAIM_2PASS_V13"
+			return false
+		}
+		if trade.EntryMode != "RECLAIM_CONFIRMED_V13" {
+			trade.EntryMode = "RECLAIM_CONFIRMED_V13"
+			return false
+		}
+		return true
 	}
 	if trade.StrategyVersion >= 12 {
 		confirmPrice := trade.EntryPrice * (1 + paperReclaimConfirmPercent)
@@ -481,6 +498,16 @@ func paperEntryCancelReason(trade repo.PaperTrade, now time.Time, bid float64) s
 	}
 	if trade.Status == "BUY_PENDING" && bid > trade.EntryPrice*(1+paperEntryRunawayPercent) {
 		return "ENTRY_RAN_AWAY"
+	}
+	return ""
+}
+
+func paperReclaimTooExpensive(trade repo.PaperTrade, bid, ask float64) string {
+	if trade.StrategyVersion < 13 || trade.Status != "PULLBACK_SEEN" || bid < trade.EntryPrice || ask <= 0 {
+		return ""
+	}
+	if ask > trade.EntryPrice*(1+paperMaxReclaimAskPremium) {
+		return "RECLAIM_TOO_EXPENSIVE"
 	}
 	return ""
 }

@@ -62,7 +62,7 @@ func TestPaperFillQuantity_doesNotExceedRemaining(t *testing.T) {
 	}
 }
 
-func TestBuildPaperTrade_v12WaitsForPullback(t *testing.T) {
+func TestBuildPaperTrade_v13WaitsForPullback(t *testing.T) {
 	trade, ok, err := buildPaperTrade(
 		repo.PalisadeSignalState{
 			Symbol: "TESTUSDT", SupportPrice: 100, EntryPrice: 100.1,
@@ -77,10 +77,10 @@ func TestBuildPaperTrade_v12WaitsForPullback(t *testing.T) {
 		time.Now().UTC(),
 	)
 	if err != nil || !ok {
-		t.Fatalf("expected valid v12 paper trade, ok=%v err=%v", ok, err)
+		t.Fatalf("expected valid v13 paper trade, ok=%v err=%v", ok, err)
 	}
-	if trade.EntryMode != "RECLAIM_2PASS_V12" || trade.Status != "BUY_PENDING" || math.Abs(trade.SupportPrice-100) > 1e-12 || math.Abs(trade.EntryPrice-100.1) > 1e-12 {
-		t.Fatalf("unexpected v12 levels: mode=%s status=%s support=%.4f entry=%.4f", trade.EntryMode, trade.Status, trade.SupportPrice, trade.EntryPrice)
+	if trade.EntryMode != "RECLAIM_2PASS_V13" || trade.Status != "BUY_PENDING" || math.Abs(trade.SupportPrice-100) > 1e-12 || math.Abs(trade.EntryPrice-100.1) > 1e-12 {
+		t.Fatalf("unexpected v13 levels: mode=%s status=%s support=%.4f entry=%.4f", trade.EntryMode, trade.Status, trade.SupportPrice, trade.EntryPrice)
 	}
 	if math.Abs(trade.Quantity-0.099) > 1e-12 || trade.FilledQuantity != 0 || trade.BuyQuote != 0 || trade.OpenedAt != nil {
 		t.Fatalf("expected pending pullback entry, quantity=%.8f filled=%.8f quote=%.8f", trade.Quantity, trade.FilledQuantity, trade.BuyQuote)
@@ -161,7 +161,7 @@ func TestPaperEntryCancelReason_v11DistinguishesReclaimTimeout(t *testing.T) {
 	}
 }
 
-func TestPaperReboundConfirmed_v12RequiresTwoConfirmationsAboveThreshold(t *testing.T) {
+func TestPaperReboundConfirmed_v13RequiresTwoConfirmationsAtPlannedEntry(t *testing.T) {
 	trade := repo.PaperTrade{StrategyVersion: paperStrategyVersion, EntryLowPrice: 100, EntryPrice: 100.1}
 	if paperReboundConfirmed(&trade, 99.8) {
 		t.Fatal("expected a new low not to confirm entry")
@@ -176,27 +176,45 @@ func TestPaperReboundConfirmed_v12RequiresTwoConfirmationsAboveThreshold(t *test
 		t.Fatalf("expected recovery maximum 99.95, got %.8f", trade.MaxBidPrice)
 	}
 	if paperReboundConfirmed(&trade, 100.1) {
-		t.Fatal("expected return to planned entry to remain unconfirmed")
+		t.Fatal("expected first confirmation at planned entry to wait for a second pass")
 	}
-	if paperReboundConfirmed(&trade, 100.36) {
-		t.Fatal("expected first confirmation above threshold to wait for a second pass")
-	}
-	if trade.EntryMode != "RECLAIM_CONFIRMED_V12" {
+	if trade.EntryMode != "RECLAIM_CONFIRMED_V13" {
 		t.Fatalf("expected persisted first confirmation, got %q", trade.EntryMode)
 	}
-	if !paperReboundConfirmed(&trade, 100.38) {
-		t.Fatal("expected second confirmation above threshold to confirm entry")
+	if !paperReboundConfirmed(&trade, 100.12) {
+		t.Fatal("expected second confirmation at planned entry to confirm entry")
 	}
-	if paperReboundConfirmed(&trade, 100.1) {
-		t.Fatal("expected loss of confirmation threshold to reset confirmation")
+	if paperReboundConfirmed(&trade, 100.09) {
+		t.Fatal("expected loss of planned entry to reset confirmation")
 	}
-	if trade.EntryMode != "RECLAIM_2PASS_V12" {
+	if trade.EntryMode != "RECLAIM_2PASS_V13" {
 		t.Fatalf("expected confirmation reset, got %q", trade.EntryMode)
+	}
+
+	legacyV12 := repo.PaperTrade{StrategyVersion: 12, EntryLowPrice: 100, EntryPrice: 100.1}
+	if paperReboundConfirmed(&legacyV12, 100.2) {
+		t.Fatal("expected v12 to retain its higher confirmation threshold")
+	}
+	if paperReboundConfirmed(&legacyV12, 100.36) {
+		t.Fatal("expected v12 first confirmation to wait for a second pass")
+	}
+	if !paperReboundConfirmed(&legacyV12, 100.38) {
+		t.Fatal("expected v12 second confirmation to open the position")
 	}
 
 	legacy := repo.PaperTrade{StrategyVersion: 9, EntryLowPrice: 99.8, EntryPrice: 100.1}
 	if !paperReboundConfirmed(&legacy, 99.95) {
 		t.Fatal("expected v9 rebound behavior to remain unchanged")
+	}
+}
+
+func TestPaperReclaimTooExpensive_v13UsesAskPrice(t *testing.T) {
+	trade := repo.PaperTrade{StrategyVersion: paperStrategyVersion, Status: "PULLBACK_SEEN", EntryPrice: 100}
+	if got := paperReclaimTooExpensive(trade, 100, 100.15); got != "" {
+		t.Fatalf("expected permitted ask premium, got %q", got)
+	}
+	if got := paperReclaimTooExpensive(trade, 100, 100.16); got != "RECLAIM_TOO_EXPENSIVE" {
+		t.Fatalf("expected expensive reclaim cancellation, got %q", got)
 	}
 }
 
