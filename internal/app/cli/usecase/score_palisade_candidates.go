@@ -123,6 +123,7 @@ func (u *ScorePalisadeCandidates) Process(ctx context.Context, debug bool) error
 			i+1, candidate.symbol, formatPrice(candidate.current), formatPrice(candidate.entry), formatPrice(candidate.resistance),
 			candidate.netProfit*100, candidate.volume, candidate.spread*100, candidate.touchesSupport, candidate.touchesResistance, candidate.score)
 	}
+	saved := 0
 	sent := 0
 	now := time.Now().UTC()
 	for _, candidate := range candidates {
@@ -149,23 +150,26 @@ func (u *ScorePalisadeCandidates) Process(ctx context.Context, debug bool) error
 			}
 			continue
 		}
-		message := formatPalisadeSignal(candidate, now)
-		if _, err := u.telegram.Send(message); err != nil {
-			return wrap.Errorf("send signal %s: %w", candidate.symbol, err)
-		}
+		// Paper trading must receive the candidate even if Telegram is temporarily unavailable.
 		if err := u.stateRepo.SavePalisadeSignal(ctx, candidate.symbol, now, float64(candidate.score)); err != nil {
 			return wrap.Errorf("save signal %s: %w", candidate.symbol, err)
 		}
 		if err := u.stateRepo.SavePalisadeSignalState(ctx, state); err != nil {
 			return wrap.Errorf("save signal state %s: %w", candidate.symbol, err)
 		}
-		sent++
-		if sent >= maxSignalsPerRun {
+		saved++
+		message := formatPalisadeSignal(candidate, now)
+		if _, err := u.telegram.Send(message); err != nil {
+			fmt.Printf("Telegram: сигнал %s сохранён, но не отправлен: %v\n", candidate.symbol, err)
+		} else {
+			sent++
+		}
+		if saved >= maxSignalsPerRun {
 			break
 		}
 	}
 
-	fmt.Printf("Отправлено сигналов: %d\n", sent)
+	fmt.Printf("Сохранено сигналов: %d, отправлено в Telegram: %d\n", saved, sent)
 	return nil
 }
 
